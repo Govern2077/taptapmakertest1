@@ -22,6 +22,7 @@ local aoeEffects_  = {}   -- expanding shockwaves
 local emitters_    = {}   -- laser emitters placed on walls
 local fireZones_   = {}   -- persistent fire zones on walls
 local bubbles_     = {}   -- slow-moving bubbles with contact DPS
+local meteors_     = {}   -- delayed meteor drops (陨石延迟落下)
 
 -- ============================================================================
 -- Knockback helper (level→value mapping)
@@ -295,9 +296,96 @@ function SkillExecutor.Fire(skillDef, ownerTeam, targetTeam, ox, oy, dirX, dirY)
                 turnRate = p.turnRate,
             })
         end
+
+    -- ========== water_dragon (水龙) ==========
+    elseif pType == "water_dragon" then
+        local p = {
+            skillId = skillDef.id, type = "water_dragon",
+            ownerTeam = ownerTeam, targetTeam = targetTeam,
+            x = sx, y = sy,
+            vx = dirX * skillDef.projSpeed, vy = dirY * skillDef.projSpeed,
+            radius = skillDef.projRadius, alive = true, age = 0,
+            damage = skillDef.damage,
+            knockback = GetKnockback(skillDef.params),
+            color = skillDef.color,
+            -- bounce params
+            bouncesLeft     = skillDef.params.maxBounces or 5,
+            splashCount     = skillDef.params.splashCount,
+            splashDamage    = skillDef.params.splashDamage,
+            splashSpeed     = skillDef.params.splashSpeed,
+            splashRadius    = skillDef.params.splashRadius,
+            splashSpread    = skillDef.params.splashSpread,
+            -- hit effects
+            wallSlamDamage  = skillDef.params.wallSlamDamage,
+            knockbackWindow = skillDef.params.knockbackWindow,
+            stunDuration    = skillDef.params.stunDuration,
+        }
+        table.insert(projectiles_, p)
+        table.insert(visualProjs_, {
+            type = "beam", x = sx, y = sy,
+            vx = p.vx, vy = p.vy,
+            radius = p.radius, alive = true, age = 0, trail = {},
+            color = p.color, trailLen = 12,
+        })
+
+    -- ========== meteorite (陨石) ==========
+    elseif pType == "meteorite" then
+        local p = {
+            skillId = skillDef.id, type = "meteorite",
+            ownerTeam = ownerTeam, targetTeam = targetTeam,
+            x = sx, y = sy,
+            vx = dirX * skillDef.projSpeed, vy = dirY * skillDef.projSpeed,
+            radius = skillDef.projRadius, alive = true, age = 0,
+            damage = skillDef.damage,
+            knockback = GetKnockback(skillDef.params),
+            color = skillDef.color,
+            -- hit effects
+            stunDuration    = skillDef.params.stunDuration,
+            meteorDelay     = skillDef.params.meteorDelay,
+            meteorDamage    = skillDef.params.meteorDamage,
+            meteorAoeRadius = skillDef.params.meteorAoeRadius,
+            meteorAoeDamage = skillDef.params.meteorAoeDamage,
+            dotTotal        = skillDef.params.dotTotal,
+            dotDuration     = skillDef.params.dotDuration,
+            -- wall homing params
+            wallHomingCount    = skillDef.params.wallHomingCount,
+            wallHomingSpeed    = skillDef.params.wallHomingSpeed,
+            wallHomingRadius   = skillDef.params.wallHomingRadius,
+            wallHomingTurnRate = skillDef.params.wallHomingTurnRate,
+            wallHomingDamage   = skillDef.params.wallHomingDamage,
+            wallHomingLife     = skillDef.params.wallHomingLife,
+        }
+        table.insert(projectiles_, p)
+        table.insert(visualProjs_, {
+            type = "single", x = sx, y = sy,
+            vx = p.vx, vy = p.vy,
+            radius = p.radius, alive = true, age = 0, trail = {},
+            color = p.color, trailLen = 6,
+        })
     end
 
     return skillDef.cooldown
+end
+
+-- ============================================================================
+-- Sweep collision: line-segment (A→B) vs circle (center C, radius R)
+-- Returns true if any point on segment AB is within distance R of C.
+-- ============================================================================
+
+local function SweepHitCircle(ax, ay, bx, by, cx, cy, R)
+    local ex, ey = bx - ax, by - ay   -- segment direction
+    local fx, fy = ax - cx, ay - cy   -- start relative to circle center
+    local segLenSq = ex * ex + ey * ey
+    if segLenSq < 0.001 then
+        -- Degenerate segment (zero length) → point check
+        return (fx * fx + fy * fy) < R * R
+    end
+    -- Project circle center onto segment: t in [0,1]
+    local t = -(fx * ex + fy * ey) / segLenSq
+    if t < 0 then t = 0 elseif t > 1 then t = 1 end
+    local nearX = ax + t * ex - cx
+    local nearY = ay + t * ey - cy
+    return (nearX * nearX + nearY * nearY) < R * R
 end
 
 -- ============================================================================
@@ -358,6 +446,9 @@ function SkillExecutor.Update(dt, balls, callbacks)
                 p.vy = math.sin(newA) * spd
             end
         end
+
+        -- Save previous position for sweep collision
+        local prevX, prevY = p.x, p.y
 
         p.x = p.x + p.vx * dt
         p.y = p.y + p.vy * dt
@@ -459,18 +550,71 @@ function SkillExecutor.Update(dt, balls, callbacks)
                 })
                 p.alive = false
 
+            -- ---- water_dragon type: bounce + splash each time ----
+            elseif p.type == "water_dragon" then
+                -- Spawn splash projectiles each bounce
+                local refNx = wnx ~= 0 and wnx or 0
+                local refNy = wny ~= 0 and wny or 0
+                if refNx == 0 and refNy == 0 then refNx = 1 end
+                SpawnSplashProjectiles(p, p.splashCount or 10, p.splashDamage or 5,
+                    p.splashSpeed or 300, p.splashRadius or 5,
+                    p.splashSpread or math.pi, p.ownerTeam, p.targetTeam, p.color,
+                    refNx, refNy, false)
+
+                -- Reflect velocity (bounce)
+                if wnx ~= 0 then p.vx = -p.vx end
+                if wny ~= 0 then p.vy = -p.vy end
+
+                p.bouncesLeft = (p.bouncesLeft or 1) - 1
+                if p.bouncesLeft <= 0 then
+                    p.alive = false
+                end
+
+            -- ---- meteorite type: spawn homing sub-projectiles on wall ----
+            elseif p.type == "meteorite" then
+                local homingCount = p.wallHomingCount or 3
+                local baseAngle = math.atan(p.vy, p.vx) + math.pi -- reflect direction
+                local spread = math.pi * 0.6
+                for hi = 1, homingCount do
+                    local offset = (hi - (homingCount + 1) / 2) * (spread / math.max(1, homingCount - 1))
+                    local angle = baseAngle + offset
+                    local dx, dy = math.cos(angle), math.sin(angle)
+                    local hSpd = p.wallHomingSpeed or 340
+                    local hp = {
+                        skillId = p.skillId, type = "homing",
+                        ownerTeam = p.ownerTeam, targetTeam = p.targetTeam,
+                        x = p.x, y = p.y,
+                        vx = dx * hSpd, vy = dy * hSpd,
+                        radius = p.wallHomingRadius or 5, alive = true, age = 0,
+                        damage = p.wallHomingDamage or 3,
+                        turnRate = p.wallHomingTurnRate or 1.2,
+                        color = { r = 255, g = 160, b = 60 },
+                        lifetime = p.wallHomingLife or 6,
+                        knockback = 80,
+                    }
+                    table.insert(projectiles_, hp)
+                    table.insert(visualProjs_, {
+                        type = "homing", targetTeam = p.targetTeam,
+                        x = hp.x, y = hp.y,
+                        vx = hp.vx, vy = hp.vy,
+                        radius = hp.radius, alive = true, age = 0, trail = {},
+                        color = hp.color, trailLen = 5,
+                        turnRate = hp.turnRate,
+                    })
+                end
+                p.alive = false
+
             -- ---- default: destroy on wall ----
             else
                 p.alive = false
             end
         end
 
-        -- Hit check against target ball
+        -- Hit check against target ball (sweep: prevPos → curPos vs ball)
         if p.alive and balls[p.targetTeam] then
             local tgt = balls[p.targetTeam]
-            local dx, dy = tgt.x - p.x, tgt.y - p.y
-            local d = math.sqrt(dx * dx + dy * dy)
-            if d < BALL.Radius + p.radius then
+            local hitRadius = BALL.Radius + p.radius
+            if SweepHitCircle(prevX, prevY, p.x, p.y, tgt.x, tgt.y, hitRadius) then
 
                 -- All types: destroy on hit
                 p.alive = false
@@ -518,6 +662,50 @@ function SkillExecutor.Update(dt, balls, callbacks)
                     end
                     if callbacks.onHit then
                         callbacks.onHit(p.targetTeam, p.damage, kx, ky, "beam", p.skillId, p)
+                    end
+                elseif p.type == "water_dragon" then
+                    -- Water dragon: huge knockback → wall slam + stun (same as water_pillar)
+                    local spd = math.sqrt(p.vx * p.vx + p.vy * p.vy)
+                    local kx, ky = 0, 0
+                    if spd > 1 and p.knockback > 0 then
+                        kx = (p.vx / spd) * p.knockback
+                        ky = (p.vy / spd) * p.knockback
+                    end
+                    if callbacks.onHit then
+                        callbacks.onHit(p.targetTeam, p.damage, kx, ky, "beam", p.skillId, p)
+                    end
+                elseif p.type == "meteorite" then
+                    -- Meteorite: direct damage + stun + delayed meteor + DOT
+                    local spd = math.sqrt(p.vx * p.vx + p.vy * p.vy)
+                    local kx, ky = 0, 0
+                    if spd > 1 and p.knockback > 0 then
+                        kx = (p.vx / spd) * p.knockback
+                        ky = (p.vy / spd) * p.knockback
+                    end
+                    -- Direct hit damage + stun
+                    if callbacks.onHit then
+                        callbacks.onHit(p.targetTeam, p.damage, kx, ky, "meteor_hit", p.skillId, p)
+                    end
+                    -- Stun the target
+                    if callbacks.onStun then
+                        callbacks.onStun(p.targetTeam, p.stunDuration or 2.5)
+                    end
+                    -- Schedule delayed meteor drop at hit location
+                    table.insert(meteors_, {
+                        skillId = p.skillId,
+                        ownerTeam = p.ownerTeam, targetTeam = p.targetTeam,
+                        x = tgt.x, y = tgt.y,
+                        delay = p.meteorDelay or 1.5,
+                        elapsed = 0,
+                        meteorDamage = p.meteorDamage or 5,
+                        meteorAoeRadius = p.meteorAoeRadius or 80,
+                        meteorAoeDamage = p.meteorAoeDamage or 3,
+                        color = p.color,
+                        landed = false,
+                    })
+                    -- Apply DOT
+                    if p.dotTotal and callbacks.onDot then
+                        callbacks.onDot(p.targetTeam, p.ownerTeam, p.dotTotal, p.dotDuration, 0)
                     end
                 else
                     -- Standard hit
@@ -719,6 +907,56 @@ function SkillExecutor.Update(dt, balls, callbacks)
         end
     end
 
+    -- === Meteors: delayed meteor drops ===
+    i = 1
+    while i <= #meteors_ do
+        local m = meteors_[i]
+        m.elapsed = m.elapsed + dt
+
+        if not m.landed and m.elapsed >= m.delay then
+            m.landed = true
+            m.landTime = 0
+            -- Direct meteor damage on target if still in range
+            if balls[m.targetTeam] then
+                local tgt = balls[m.targetTeam]
+                local dx, dy = tgt.x - m.x, tgt.y - m.y
+                local d = math.sqrt(dx * dx + dy * dy)
+                if d < m.meteorAoeRadius + BALL.Radius then
+                    if callbacks.onHit then
+                        callbacks.onHit(m.targetTeam, m.meteorDamage, 0, 0, "meteor_land", m.skillId)
+                    end
+                end
+            end
+            -- AOE shockwave
+            table.insert(aoeEffects_, {
+                skillId = m.skillId,
+                ownerTeam = m.ownerTeam, targetTeam = m.targetTeam,
+                x = m.x, y = m.y,
+                currentRadius = 0,
+                maxRadius = m.meteorAoeRadius,
+                expandSpeed = 350,
+                damage = m.meteorAoeDamage,
+                knockback = 200,
+                duration = 0.5,
+                elapsed = 0,
+                hasHit = false,
+                color = m.color,
+            })
+        end
+
+        -- Remove after landing animation completes
+        if m.landed then
+            m.landTime = (m.landTime or 0) + dt
+            if m.landTime > 0.8 then
+                table.remove(meteors_, i)
+            else
+                i = i + 1
+            end
+        else
+            i = i + 1
+        end
+    end
+
     -- === DOTs ===
     SkillExecutor.UpdateDots(dt, balls, callbacks)
 end
@@ -798,17 +1036,45 @@ function SkillExecutor.UpdateVisuals(dt, balls)
         table.insert(p.trail, 1, { x = p.x, y = p.y })
         while #p.trail > (p.trailLen or 4) do table.remove(p.trail) end
 
+        -- Save previous position for sweep collision
+        local vprevX, vprevY = p.x, p.y
+
         p.x = p.x + p.vx * dt
         p.y = p.y + p.vy * dt
 
         local remove = false
-        if p.x < -30 or p.x > size + 30 or p.y < -30 or p.y > size + 30 or p.age > 8 then
+        if p.age > 8 then
             remove = true
         end
+
+        -- Wall collision for visual projectiles (no penetration)
+        if not remove then
+            local hitWall = false
+            if p.x - p.radius < 0 then
+                p.x = p.radius; hitWall = true
+                if p.type == "beam" then p.vx = math.abs(p.vx) end
+            elseif p.x + p.radius > size then
+                p.x = size - p.radius; hitWall = true
+                if p.type == "beam" then p.vx = -math.abs(p.vx) end
+            end
+            if p.y - p.radius < 0 then
+                p.y = p.radius; hitWall = true
+                if p.type == "beam" then p.vy = math.abs(p.vy) end
+            elseif p.y + p.radius > size then
+                p.y = size - p.radius; hitWall = true
+                if p.type == "beam" then p.vy = -math.abs(p.vy) end
+            end
+            -- Beam bounces off walls; all others are destroyed
+            if hitWall and p.type ~= "beam" then
+                remove = true
+            end
+        end
+
+        -- Hit target ball → remove (sweep: prevPos → curPos vs ball)
         if not remove and p.targetTeam and balls[p.targetTeam] then
             local tgt = balls[p.targetTeam]
-            local dx, dy = tgt.x - p.x, tgt.y - p.y
-            if math.sqrt(dx * dx + dy * dy) < BALL.Radius + p.radius then
+            local hitR = BALL.Radius + p.radius
+            if SweepHitCircle(vprevX, vprevY, p.x, p.y, tgt.x, tgt.y, hitR) then
                 remove = true
             end
         end
@@ -986,6 +1252,80 @@ function SkillExecutor.Draw(vg, arenaX, arenaY)
         end
     end
 
+    -- Meteors (warning circle + falling rock + impact flash)
+    for _, m in ipairs(meteors_) do
+        local mx, my = arenaX + m.x, arenaY + m.y
+        local c = m.color or { r = 255, g = 100, b = 30 }
+
+        if not m.landed then
+            -- Pre-landing: pulsing warning circle
+            local t = m.elapsed / m.delay  -- 0→1
+            local warningR = (m.meteorAoeRadius or 80) * (0.5 + 0.5 * t)
+            local pulse = math.sin(m.elapsed * 10) * 0.3 + 0.7
+            local alpha = math.floor(60 + 120 * t * pulse)
+
+            -- Warning fill
+            nvgBeginPath(vg); nvgCircle(vg, mx, my, warningR)
+            nvgFillPaint(vg, nvgRadialGradient(vg, mx, my, warningR * 0.2, warningR,
+                nvgRGBA(255, 60, 20, math.floor(alpha * 0.4)),
+                nvgRGBA(255, 30, 0, math.floor(alpha * 0.1))))
+            nvgFill(vg)
+
+            -- Warning ring
+            nvgBeginPath(vg); nvgCircle(vg, mx, my, warningR)
+            nvgStrokeColor(vg, nvgRGBA(255, 80, 30, alpha))
+            nvgStrokeWidth(vg, 2.5); nvgStroke(vg)
+
+            -- Inner crosshair
+            local crossSize = 8 + 6 * t
+            nvgBeginPath(vg)
+            nvgMoveTo(vg, mx - crossSize, my); nvgLineTo(vg, mx + crossSize, my)
+            nvgMoveTo(vg, mx, my - crossSize); nvgLineTo(vg, mx, my + crossSize)
+            nvgStrokeColor(vg, nvgRGBA(255, 200, 100, alpha))
+            nvgStrokeWidth(vg, 1.5); nvgStroke(vg)
+
+            -- Falling rock indicator (shrinking circle above)
+            local fallProgress = t
+            local rockY = my - 60 * (1 - fallProgress)
+            local rockR = 6 + 8 * fallProgress
+            nvgBeginPath(vg); nvgCircle(vg, mx, rockY, rockR)
+            nvgFillColor(vg, nvgRGBA(c.r, c.g, c.b, math.floor(180 * fallProgress)))
+            nvgFill(vg)
+            -- Rock glow
+            nvgBeginPath(vg); nvgCircle(vg, mx, rockY, rockR + 4)
+            nvgFillPaint(vg, nvgRadialGradient(vg, mx, rockY, rockR * 0.5, rockR + 4,
+                nvgRGBA(255, 200, 80, math.floor(80 * fallProgress)),
+                nvgRGBA(255, 100, 20, 0)))
+            nvgFill(vg)
+        else
+            -- Post-landing: impact flash + crater
+            local lt = m.landTime or 0
+            local fadeT = 1 - math.min(lt / 0.8, 1)
+            local impactR = (m.meteorAoeRadius or 80) * (0.6 + 0.4 * (1 - fadeT))
+            local alpha = math.floor(200 * fadeT)
+
+            -- Impact flash (bright center)
+            if lt < 0.15 then
+                local flashAlpha = math.floor(255 * (1 - lt / 0.15))
+                nvgBeginPath(vg); nvgCircle(vg, mx, my, impactR * 0.8)
+                nvgFillPaint(vg, nvgRadialGradient(vg, mx, my, 0, impactR * 0.8,
+                    nvgRGBA(255, 255, 200, flashAlpha),
+                    nvgRGBA(255, 120, 30, math.floor(flashAlpha * 0.3))))
+                nvgFill(vg)
+            end
+
+            -- Crater ring
+            nvgBeginPath(vg); nvgCircle(vg, mx, my, impactR)
+            nvgFillPaint(vg, nvgRadialGradient(vg, mx, my, impactR * 0.3, impactR,
+                nvgRGBA(255, 80, 20, math.floor(alpha * 0.3)),
+                nvgRGBA(c.r, c.g, c.b, math.floor(alpha * 0.05))))
+            nvgFill(vg)
+            nvgBeginPath(vg); nvgCircle(vg, mx, my, impactR)
+            nvgStrokeColor(vg, nvgRGBA(255, 120, 40, math.floor(alpha * 0.6)))
+            nvgStrokeWidth(vg, 2 * fadeT); nvgStroke(vg)
+        end
+    end
+
     -- AOE effects
     for _, a in ipairs(aoeEffects_) do
         local ax, ay = arenaX + a.x, arenaY + a.y
@@ -1013,6 +1353,7 @@ function SkillExecutor.Clear()
     emitters_    = {}
     fireZones_   = {}
     bubbles_     = {}
+    meteors_     = {}
 end
 
 -- ============================================================================
@@ -1041,6 +1382,10 @@ end
 
 function SkillExecutor.GetDots()
     return dots_
+end
+
+function SkillExecutor.GetMeteors()
+    return meteors_
 end
 
 return SkillExecutor

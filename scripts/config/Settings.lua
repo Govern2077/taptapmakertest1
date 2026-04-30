@@ -33,9 +33,9 @@ Settings.Ball = {
 -- ============================================================================
 
 Settings.Tiers = {
-    normal   = { min = 50, max = 100 },  -- 普通技能 HP 100-50
-    enhanced = { min = 20, max = 50  },  -- 强化技能 HP 50-20
-    ultimate = { min = 0,  max = 20  },  -- 决战技能 HP 20-0
+    normal   = { min = 0,  max = 100 },  -- 普通技能：全血量可用
+    enhanced = { min = 0,  max = 60  },  -- 强化技能：HP <= 60 可用
+    ultimate = { min = 0,  max = 30  },  -- 终结技能：HP <= 30 可用
 }
 
 -- ============================================================================
@@ -122,6 +122,20 @@ Settings.AI = {
     DodgeRadius      = 60,    -- dodge projectiles within this radius
     AimLeadFactor    = 0.3,   -- lead prediction multiplier
     ShootRandomDelay = 0.3,   -- random additional delay on auto-shoot
+}
+
+-- ============================================================================
+-- Battle Royale (吃鸡大战)
+-- ============================================================================
+
+Settings.BattleRoyale = {
+    MapSize         = 2400,     -- 地图逻辑尺寸 2400x2400
+    GridCols        = 30,       -- 网格列数
+    GridRows        = 30,       -- 网格行数
+    CellSize        = 80,       -- 每格 80x80 (2400/30)
+    ViewportSize    = 600,      -- 摄像机可视范围
+    BallCount       = 31,       -- 1 玩家 + 30 AI
+    CameraLerpSpeed = 5.0,      -- 摄像机跟随平滑速度
 }
 
 -- ============================================================================

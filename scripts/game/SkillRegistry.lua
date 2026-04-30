@@ -2,6 +2,7 @@
 -- SkillRegistry.lua - Data-driven Skill Definitions (按设计图重制)
 -- 基础能力 (HP 100-50): 水球、火球、水蛭、脉冲波、分裂泡、激光
 -- 强化能力 (HP 50-30):  水柱、烈焰、血蝙蝠
+-- 终结能力 (HP 30-0):   水龙、陨石
 -- ============================================================================
 
 local SkillRegistry = {}
@@ -250,6 +251,80 @@ local skills = {
             dotDuration  = 10,
             healTotal    = 10,        -- 吸血=伤害
             lifetime     = 12,
+        },
+    },
+
+    -- ===================== 终结能力 Ultimate Tier (HP 30-0) =====================
+
+    -- 水龙: 伤害10, CD10s, 反冲力2, 冲击力3
+    -- 碰壁→反弹进发10颗伤害5的小水滴, 最多碰壁5次才消失
+    -- 命中敌人→巨大冲击力击退, 撞墙再受10伤+2s眩晕
+    {
+        id          = "water_dragon",
+        name        = "水龙",
+        tier        = "ultimate",
+        icon        = "image/skill_water_dragon_20260430053200.png",
+        description = "龙形水流碰壁5次溅射水滴，命中造成撞墙重伤+眩晕",
+        cooldown    = 10.0,
+        projSpeed   = 600,
+        projRadius  = 14,
+        damage      = 10,
+        knockbackLevel = 2,
+        impactLevel = 3,
+        projType    = "water_dragon",
+        color       = { r = 30, g = 160, b = 255 },
+        params      = {
+            knockback       = 500,
+            -- 碰壁溅射 (每次碰壁产生10颗水滴)
+            splashCount     = 10,
+            splashDamage    = 5,
+            splashSpeed     = 300,
+            splashRadius    = 5,
+            splashSpread    = math.pi,
+            -- 最多碰壁次数
+            maxBounces      = 5,
+            -- 命中效果: 撞墙伤害 + 眩晕
+            wallSlamDamage  = 10,
+            knockbackWindow = 1.0,
+            stunDuration    = 2.0,
+        },
+    },
+
+    -- 陨石: 伤害8, CD10s, 反冲力2, 冲击力2
+    -- 命中→定格敌人+召唤陨石(5s后落下), 陨石落地5伤害+冲击波3伤害
+    -- 碰壁→3个轻微追踪弹, 命中→基础伤害+15DOT(5/秒)
+    {
+        id          = "meteorite",
+        name        = "陨石",
+        tier        = "ultimate",
+        icon        = "image/skill_meteorite_20260430053200.png",
+        description = "命中定格敌人并召唤陨石轰炸，碰壁射出追踪弹",
+        cooldown    = 10.0,
+        projSpeed   = 500,
+        projRadius  = 12,
+        damage      = 8,
+        knockbackLevel = 2,
+        impactLevel = 2,
+        projType    = "meteorite",
+        color       = { r = 255, g = 100, b = 30 },
+        params      = {
+            knockback       = 400,
+            -- 命中效果: 定格 + 召唤陨石
+            stunDuration    = 2.5,       -- 定格时间
+            meteorDelay     = 1.5,       -- 陨石延迟落下
+            meteorDamage    = 5,         -- 陨石落地伤害
+            meteorAoeRadius = 80,        -- 冲击波半径
+            meteorAoeDamage = 3,         -- 冲击波伤害
+            -- 命中 DOT
+            dotTotal        = 15,
+            dotDuration     = 3,         -- 5/秒 * 3秒
+            -- 碰壁: 3个追踪弹
+            wallHomingCount    = 3,
+            wallHomingSpeed    = 340,
+            wallHomingRadius   = 5,
+            wallHomingTurnRate = 1.2,
+            wallHomingDamage   = 3,
+            wallHomingLife     = 6,
         },
     },
 }

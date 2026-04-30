@@ -48,14 +48,12 @@ function BallCustomization.Randomize()
     local exprIdx = math.random(1, #Expressions.list)
     local expression = Expressions.list[exprIdx].id
 
-    -- Pick random skills (one per tier, or none)
+    -- Pick random skills (one per tier, always assigned)
     local skills = {}
     for _, tier in ipairs({ "normal", "enhanced", "ultimate" }) do
         local tierSkills = SkillRegistry.GetByTier(tier)
-        if #tierSkills > 0 and math.random() > 0.3 then
+        if #tierSkills > 0 then
             skills[tier] = tierSkills[math.random(1, #tierSkills)].id
-        else
-            skills[tier] = nil
         end
     end
 

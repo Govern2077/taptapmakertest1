@@ -10,6 +10,7 @@ local ItemSlot        = require("urhox-libs/UI/Components/ItemSlot")
 local DragDropContext = require("urhox-libs/UI/Components/DragDropContext")
 local SkillRegistry   = require("game.SkillRegistry")
 local BallCustomization = require("game.BallCustomization")
+local TriangleButton  = require("ui.TriangleButton")
 
 local CultivationPage = {}
 
@@ -18,7 +19,7 @@ local CultivationPage = {}
 -- ============================================================================
 
 local currentData_ = nil
-local onSave_      = nil
+local onChanged_   = nil
 local onBack_      = nil
 
 local ballPreview_   = nil
@@ -36,6 +37,16 @@ local CARD_SIZE    = 70    -- pool skill card size
 local CARD_GAP     = 12    -- gap between cards in pool
 
 -- ============================================================================
+-- Auto-save helper
+-- ============================================================================
+
+local function autoSave()
+    if onChanged_ and currentData_ then
+        onChanged_(currentData_)
+    end
+end
+
+-- ============================================================================
 -- Skill item helpers
 -- ============================================================================
 
@@ -48,6 +59,8 @@ local SKILL_EMOJI = {
     water_pillar = "🌊",
     inferno      = "💥",
     blood_bat    = "🦇",
+    water_dragon = "🐉",
+    meteorite    = "☄️",
 }
 
 --- Build item data for ItemSlot from a skill definition
@@ -146,6 +159,7 @@ local function buildTierRow(def, dragContext)
             if item then
                 currentData_.skills[def.tier] = nil
                 updateEquipSlots()
+                autoSave()
             end
         end,
     }
@@ -220,11 +234,11 @@ end
 -- ============================================================================
 
 ---@param data table  Current customization data (deep-copied)
----@param callbacks table  { onSave, onBack }
+---@param callbacks table  { onChanged, onBack }
 function CultivationPage.Show(data, callbacks)
     currentData_ = BallCustomization.DeepCopy(data)
-    onSave_ = callbacks and callbacks.onSave
-    onBack_ = callbacks and callbacks.onBack
+    onChanged_ = callbacks and callbacks.onChanged
+    onBack_    = callbacks and callbacks.onBack
     equipSlots_ = {}
 
     -- ====================================================================
@@ -248,6 +262,7 @@ function CultivationPage.Show(data, callbacks)
                 local tier = itemData.type
                 currentData_.skills[tier] = itemData.id
                 updateEquipSlots()
+                autoSave()
             end
         end,
     }
@@ -324,6 +339,7 @@ function CultivationPage.Show(data, callbacks)
                                 colorLabel_:SetText(string.format("RGB(%d, %d, %d)",
                                     color[1], color[2], color[3]))
                             end
+                            autoSave()
                         end,
                     },
                 },
@@ -377,12 +393,12 @@ function CultivationPage.Show(data, callbacks)
                 height = 48,
                 flexShrink = 0,
                 flexDirection = "row",
-                justifyContent = "space-between",
                 alignItems = "center",
                 paddingLeft = 16, paddingRight = 16,
                 backgroundColor = { 12, 12, 26, 255 },
+                gap = 16,
                 children = {
-                    UI.Button {
+                    TriangleButton {
                         text = "返回",
                         variant = "outline",
                         width = 80, height = 34,
@@ -396,16 +412,11 @@ function CultivationPage.Show(data, callbacks)
                         fontSize = 20,
                         fontWeight = "bold",
                         color = "#FFFFFF",
+                        flexGrow = 1,
+                        textAlign = "center",
                     },
-                    UI.Button {
-                        text = "保存",
-                        variant = "primary",
-                        width = 80, height = 34,
-                        fontSize = 14,
-                        onClick = function()
-                            if onSave_ then onSave_(currentData_) end
-                        end,
-                    },
+                    -- Right spacer to keep title centered
+                    UI.Panel { width = 80, height = 1 },
                 },
             },
 

@@ -163,7 +163,7 @@ function SetupNanoVG()
         print("[Client] ERROR: NanoVG creation failed")
         return
     end
-    fontNormal_ = nvgCreateFont(vg_, "sans", "Fonts/MiSans-Regular.ttf")
+    fontNormal_ = nvgCreateFont(vg_, "sans", "Fonts/LongZhuTi-Regular.ttf")
     fontBold_ = fontNormal_  -- Only Regular available
     SubscribeToEvent(vg_, "NanoVGRender", "HandleNanoVGRender")
 end
@@ -189,7 +189,7 @@ function ShowWaitingUI()
     UI.Init({
         theme = "dark",
         fonts = {
-            { family = "sans", weights = { normal = "Fonts/MiSans-Regular.ttf" } },
+            { family = "sans", weights = { normal = "Fonts/MiSans-Bold.ttf" } },
         },
         scale = UI.Scale.DESIGN_RESOLUTION(designW, designH),
     })

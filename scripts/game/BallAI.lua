@@ -63,14 +63,32 @@ function BallAI.ShouldShoot(state, cooldown, dt)
 end
 
 -- ============================================================================
--- Determine which tier is active based on current HP
+-- Determine available tiers based on current HP
+-- New: multiple tiers can be active simultaneously
+-- normal: all HP, enhanced: HP <= 60, ultimate: HP <= 30
 -- ============================================================================
 
+--- Returns all available tiers for given HP (highest priority first)
+---@param hp number
+---@return string[]
+function BallAI.GetAvailableTiers(hp)
+    local tiers = Settings.Tiers
+    local available = {}
+    -- Check from highest priority to lowest
+    if hp <= tiers.ultimate.max then table.insert(available, "ultimate") end
+    if hp <= tiers.enhanced.max then table.insert(available, "enhanced") end
+    if hp <= tiers.normal.max then table.insert(available, "normal") end
+    return available
+end
+
+--- Returns the highest priority active tier (for display/aura purposes)
+---@param hp number
+---@return string
 function BallAI.GetActiveTier(hp)
     local tiers = Settings.Tiers
-    if hp > tiers.normal.min then return "normal" end
-    if hp > tiers.enhanced.min then return "enhanced" end
-    return "ultimate"
+    if hp <= tiers.ultimate.max then return "ultimate" end
+    if hp <= tiers.enhanced.max then return "enhanced" end
+    return "normal"
 end
 
 -- ============================================================================

@@ -82,9 +82,12 @@ drawFuncs.angry = function(vg, cx, cy, r)
         nvgStroke(vg)
     end
 
-    -- Gritting mouth
+    -- Gritting mouth (rounded corners)
+    local mouthW = r * 0.36
+    local mouthH = r * 0.1
+    local mouthR = mouthH * 0.4  -- corner radius
     nvgBeginPath(vg)
-    nvgRect(vg, cx - r * 0.18, cy + r * 0.15, r * 0.36, r * 0.1)
+    nvgRoundedRect(vg, cx - mouthW / 2, cy + r * 0.15, mouthW, mouthH, mouthR)
     nvgFillColor(vg, nvgRGBA(40, 40, 40, 200))
     nvgFill(vg)
 end
