@@ -18,7 +18,15 @@ local TriangleButton    = require("ui.TriangleButton")
 local ItemSystem        = require("game.ItemSystem")
 local BackgroundBubbles = require("effects.BackgroundBubbles")
 local BattleRoyale      = require("game.BattleRoyale")
-local BreedingPage      = require("ui.BreedingPage")
+local BreedingPage           = require("ui.BreedingPage")
+local BreedingLoadingScreen  = require("ui.BreedingLoadingScreen")
+-- local TutorialMascot         = require("ui.TutorialMascot")
+-- local TutorialSystem         = require("ui.TutorialSystem")
+local ArenaBattle            = require("ui.ArenaBattle")
+local SaveSlotManager   = require("game.SaveSlotManager")
+local ShopModal         = require("ui.ShopModal")
+local ShopManager       = require("game.ShopManager")
+local SettingsModal     = require("ui.SettingsModal")
 
 local UI = require("urhox-libs/UI")
 
@@ -57,6 +65,7 @@ end
 local scene_ = nil
 local vg_ = nil
 local fontNormal_ = -1
+local breedingBgImg_ = -1  -- breeding page full-screen background image
 
 -- Game logic
 local balls_ = {}
@@ -72,6 +81,17 @@ local collisionCooldown_ = 0
 local gamePhase_ = "menu"
 local gameWinner_ = 0
 local gameOverTimer_ = 0
+
+-- Loading screen state
+local loadingActive_ = false
+local loadingElapsed_ = 0
+local loadingText_ = "正在加载云存档..."
+local loadingDone_ = false   -- true when cloud sync finished, triggers modal open
+
+-- Cloud sync preload state
+local cloudSyncDone_ = false       -- true once initial preload finishes
+local cloudSyncStarted_ = false    -- true once preload has been kicked off
+local cloudSyncPendingCb_ = nil    -- callback to run when preload finishes (if user clicked before it's done)
 
 -- Customization
 local playerCustom_ = nil
@@ -218,6 +238,22 @@ function Standalone.Start()
     SubscribeToEvent("Update", "HandleUpdate")
     SubscribeToEvent("ScreenMode", "HandleScreenMode")
 
+    -- Load saved volume settings (applies master gain before BGM plays)
+    SettingsModal.Load()
+
+    -- Play looping background music
+    local music = cache:GetResource("Sound", "audio/背景.ogg")
+    if music then
+        music.looped = true
+        local bgmNode = scene_:CreateChild("BGM")
+        local src = bgmNode:CreateComponent("SoundSource")
+        src.soundType = SOUND_MUSIC
+        src:Play(music)
+        print("[Standalone] BGM started (looping)")
+    else
+        print("[Standalone] WARNING: BGM resource not found")
+    end
+
     ShowMenu()
     print("[Standalone] Started - Ball Brawl")
 end
@@ -234,6 +270,7 @@ function SetupNanoVG()
         return
     end
     fontNormal_ = nvgCreateFont(vg_, "sans", "Fonts/LongZhuTi-Regular.ttf")
+    breedingBgImg_ = nvgCreateImage(vg_, "image/擂台赛背景.png", 0)
     SubscribeToEvent(vg_, "NanoVGRender", "HandleNanoVGRender")
 end
 
@@ -250,8 +287,331 @@ function HandleScreenMode(eventType, eventData)
 end
 
 -- ============================================================================
+-- Breeding Save Slot Selection Popup
+-- ============================================================================
+
+--- Format gold number with abbreviation
+local function FormatGold(n)
+    if n >= 1000000 then
+        return string.format("%.1fM", n / 1000000)
+    elseif n >= 10000 then
+        return string.format("%.1fW", n / 10000)
+    elseif n >= 1000 then
+        return string.format("%.1fK", n / 1000)
+    end
+    return tostring(math.floor(n))
+end
+
+--- Slot accent colors for visual distinction
+local SLOT_COLORS = { "#4fc3f7", "#66bb6a", "#ab47bc" }
+local SLOT_LABELS = { "存档一", "存档二", "存档三" }
+
+--- Build a single breeding slot card widget (horizontal layout version)
+local function BuildBreedingSlotCard(slotInfo, onSelect, onDelete)
+    local accentColor = SLOT_COLORS[slotInfo.slot] or "#4fc3f7"
+    local slotLabel = SLOT_LABELS[slotInfo.slot] or string.format("存档 %d", slotInfo.slot)
+
+    if slotInfo.exists then
+        -- Info rows
+        local infoChildren = {}
+        local infos = {
+            { icon = "💰", label = "金币", value = FormatGold(slotInfo.gold or 0) },
+            { icon = "🏡", label = "牧场", value = "Lv." .. tostring(slotInfo.farmLevel or 1) },
+            { icon = "⚽", label = "球球", value = tostring(slotInfo.ballCount or 0) },
+            { icon = "🔥", label = "连胜", value = tostring(slotInfo.bestStreak or 0) },
+        }
+        for _, info in ipairs(infos) do
+            table.insert(infoChildren, UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                justifyContent = "space-between",
+                width = "100%",
+                marginBottom = 2,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 4,
+                        children = {
+                            UI.Label { text = info.icon, fontSize = 13 },
+                            UI.Label { text = info.label, fontSize = 12, color = "#aaaacc" },
+                        },
+                    },
+                    UI.Label { text = info.value, fontSize = 12, fontWeight = "bold", color = "#ffffff" },
+                },
+            })
+        end
+
+        -- Best ball info
+        if slotInfo.bestBall then
+            local lvl = slotInfo.bestBall.level or 1
+            local bname = slotInfo.bestBall.name or "未知"
+            table.insert(infoChildren, UI.Panel {
+                flexDirection = "row",
+                alignItems = "center",
+                justifyContent = "space-between",
+                width = "100%",
+                marginTop = 2,
+                children = {
+                    UI.Panel {
+                        flexDirection = "row",
+                        alignItems = "center",
+                        gap = 4,
+                        children = {
+                            UI.Label { text = "⭐", fontSize = 13 },
+                            UI.Label { text = "最强", fontSize = 12, color = "#aaaacc" },
+                        },
+                    },
+                    UI.Label {
+                        text = string.format("%s Lv.%d", bname, lvl),
+                        fontSize = 12, fontWeight = "bold", color = "#ffd54f",
+                    },
+                },
+            })
+        end
+
+        return UI.Panel {
+            flex = 1,
+            padding = 14,
+            borderRadius = 12,
+            backgroundColor = "#2a2a3a",
+            borderWidth = 2,
+            borderColor = accentColor,
+            alignItems = "center",
+            children = {
+                -- Slot title
+                UI.Label {
+                    text = slotLabel,
+                    fontSize = 18,
+                    fontWeight = "bold",
+                    color = accentColor,
+                    marginBottom = 10,
+                },
+                -- Breeding info
+                UI.Panel {
+                    width = "100%",
+                    gap = 2,
+                    marginBottom = 12,
+                    children = infoChildren,
+                },
+                -- Continue button
+                UI.Button {
+                    text = "继续养殖",
+                    variant = "primary",
+                    width = "100%",
+                    onClick = function()
+                        if onSelect then onSelect(slotInfo.slot) end
+                    end,
+                },
+                -- Delete button
+                UI.Button {
+                    text = "删除存档",
+                    variant = "ghost",
+                    size = "sm",
+                    width = "100%",
+                    color = "#ff6666",
+                    marginTop = 6,
+                    onClick = function()
+                        if onDelete then onDelete(slotInfo.slot) end
+                    end,
+                },
+            },
+        }
+    else
+        -- Empty slot
+        return UI.Panel {
+            flex = 1,
+            padding = 14,
+            borderRadius = 12,
+            backgroundColor = "#1e1e2e",
+            borderWidth = 1,
+            borderColor = "#444466",
+            alignItems = "center",
+            justifyContent = "center",
+            minHeight = 200,
+            children = {
+                UI.Label {
+                    text = slotLabel,
+                    fontSize = 18,
+                    fontWeight = "bold",
+                    color = "#888888",
+                    marginBottom = 8,
+                },
+                UI.Label {
+                    text = "空存档",
+                    fontSize = 14,
+                    color = "#666666",
+                    marginBottom = 16,
+                },
+                UI.Button {
+                    text = "新建存档",
+                    variant = "outline",
+                    width = "100%",
+                    onClick = function()
+                        if onSelect then onSelect(slotInfo.slot) end
+                    end,
+                },
+            },
+        }
+    end
+end
+
+--- Show breeding save slot selection as overlay modal on top of start page
+---@type Modal|nil
+local saveSlotModal_ = nil
+
+--- Internal: build and open the save slot modal (called after migration completes)
+local function OpenSaveSlotModal()
+    -- Close previous modal if exists
+    if saveSlotModal_ then
+        saveSlotModal_:Close()
+        saveSlotModal_ = nil
+    end
+
+    EnsureUIInit()
+
+    local function closeModal()
+        if saveSlotModal_ then
+            saveSlotModal_:Close()
+            saveSlotModal_ = nil
+        end
+    end
+
+    -- 先查询所有存档状态，记录哪些是新存档（不存在的槽位）
+    local slots = SaveSlotManager.GetAllSlotInfo()
+    local slotExistsMap = {}
+    for _, info in ipairs(slots) do
+        slotExistsMap[info.slot] = info.exists
+    end
+
+    local function onSelectSlot(slot)
+        local isNewSave = not slotExistsMap[slot]
+        closeModal()
+        BreedingPage.SetSaveFile(SaveSlotManager.GetSlotFile(slot))
+        ShowBreeding(isNewSave)
+    end
+
+    local function onDeleteSlot(slot)
+        UI.Modal.Confirm({
+            title = "删除存档",
+            message = string.format("确定要删除存档 %d 吗？所有养殖进度将被清除，此操作不可撤销。", slot),
+            onConfirm = function()
+                SaveSlotManager.DeleteSlot(slot)
+                -- Refresh: reopen the modal with updated data
+                closeModal()
+                OpenSaveSlotModal()
+            end,
+        })
+    end
+
+    local slotCards = {}
+    for _, info in ipairs(slots) do
+        table.insert(slotCards, BuildBreedingSlotCard(info, onSelectSlot, onDeleteSlot))
+    end
+
+    -- Create modal overlay
+    saveSlotModal_ = UI.Modal {
+        title = "选择养殖存档",
+        size = "lg",
+        closeOnOverlay = true,
+        closeOnEscape = true,
+        contentPadding = 20,
+        contentGap = 16,
+    }
+
+    -- Card row
+    saveSlotModal_:AddContent(UI.Panel {
+        flexDirection = "row",
+        justifyContent = "center",
+        alignItems = "stretch",
+        gap = 14,
+        width = "100%",
+        children = slotCards,
+    })
+
+    saveSlotModal_:Open()
+end
+
+function ShowBreedingSaveSlotPopup()
+    if cloudSyncDone_ then
+        -- Preload already finished → open modal immediately, no loading screen
+        print("[Standalone] Cloud sync already done, opening save slot modal directly")
+        OpenSaveSlotModal()
+        return
+    end
+
+    -- Preload still in progress → show loading screen and wait for it to finish
+    print("[Standalone] Cloud sync still in progress, showing loading screen...")
+    loadingActive_ = true
+    loadingElapsed_ = 0
+    loadingDone_ = false
+    loadingText_ = "正在同步存档数据..."
+    StartPage.SetInputBlocked(true)
+
+    -- Register a pending callback so PreloadCloudSync's completion will trigger it
+    cloudSyncPendingCb_ = function()
+        loadingActive_ = false
+        loadingDone_ = false
+        StartPage.SetInputBlocked(false)
+        OpenSaveSlotModal()
+    end
+end
+
+-- ============================================================================
 -- Navigation
 -- ============================================================================
+
+function PreloadCloudSync()
+    if cloudSyncStarted_ then return end
+    cloudSyncStarted_ = true
+    cloudSyncDone_ = false
+
+    -- Show loading screen and block all buttons immediately
+    loadingActive_ = true
+    loadingElapsed_ = 0
+    loadingText_ = "正在加载游戏数据..."
+    StartPage.SetInputBlocked(true)
+    print("[Standalone] Auto-preloading all game data...")
+
+    -- Track two parallel tasks: save slots + shop data
+    local pendingTasks_ = 2
+
+    local function onTaskDone()
+        pendingTasks_ = pendingTasks_ - 1
+        if pendingTasks_ > 0 then return end
+
+        -- All tasks complete
+        print("[Standalone] All preload tasks complete")
+        cloudSyncDone_ = true
+        loadingActive_ = false
+        StartPage.SetInputBlocked(false)
+
+        -- Ensure equipped items reflect loaded shop data
+        ItemSystem.LoadEquipped()
+
+        -- Fire any pending callback (e.g. user already clicked breeding)
+        if cloudSyncPendingCb_ then
+            local cb = cloudSyncPendingCb_
+            cloudSyncPendingCb_ = nil
+            cb()
+        end
+    end
+
+    -- Task 1: Save slot cloud sync
+    SaveSlotManager.MigrateLegacy(function()
+        loadingText_ = "正在同步存档数据..."
+        SaveSlotManager.SyncAllFromCloud(function()
+            print("[Standalone] Save slot sync done")
+            onTaskDone()
+        end)
+    end)
+
+    -- Task 2: Shop purchase data (local load is instant, cloud sync is async)
+    ShopManager.Load(function()
+        print("[Standalone] Shop data sync done")
+        onTaskDone()
+    end)
+end
 
 function ShowMenu()
     gamePhase_ = "menu"
@@ -260,6 +620,10 @@ function ShowMenu()
         SetupNanoVG()
     end
     EnsureUIInit()
+
+    -- Auto-preload cloud saves as soon as we enter the menu
+    PreloadCloudSync()
+
     StartPage.Show({
         onBattle = function()
             StartGame()
@@ -275,7 +639,15 @@ function ShowMenu()
             StartBattleRoyale()
         end,
         onBreeding = function()
-            ShowBreeding()
+            ShowBreedingSaveSlotPopup()
+        end,
+        onShop = function()
+            EnsureUIInit()
+            ShopModal.Open()
+        end,
+        onSettings = function()
+            EnsureUIInit()
+            SettingsModal.Open()
         end,
     })
 end
@@ -294,19 +666,91 @@ function StartBattleRoyale()
     print("[Standalone] Battle Royale started!")
 end
 
-function ShowBreeding()
+function ShowBreeding(isNewSave)
     StartPage.Hide()
     if not vg_ then SetupNanoVG() end
-    gamePhase_ = "breeding"
-    BreedingPage.Show({
-        onBack = function()
-            BreedingPage.Hide()
-            ShowMenu()
-        end,
-    })
-    -- Minimal UI root (all HUD drawn by BreedingPage via NanoVG)
+    -- 先显示加载屏幕，预加载完成后再进入养殖页
+    gamePhase_ = "breeding_loading"
     UI.SetRoot(UI.Panel { width = "100%", height = "100%" })
-    print("[Standalone] Breeding page opened!")
+    BreedingLoadingScreen.Show(vg_, fontNormal_, function()
+        -- 加载完成回调：切换到正式养殖页
+        gamePhase_ = "breeding"
+        BreedingPage.Show({
+            onBack = function()
+                BreedingPage.Hide()
+                -- TutorialMascot.Dismiss()
+                ShowMenu()
+            end,
+            onBallDroppedToSlot = function(slotIdx)
+                -- TutorialSystem.OnBallDroppedToSlot(slotIdx)
+            end,
+            onBattleFinished = function(slotIdx)
+                -- TutorialSystem.OnBattleFinished(slotIdx)
+            end,
+            onBallReturnedToFarm = function(slotIdx, farmBall)
+                -- TutorialSystem.OnBallReturnedToFarm(slotIdx, farmBall)
+            end,
+            onFirstBallDroppedToArena = function()
+                -- TutorialSystem.OnFirstBallDroppedToArena()
+            end,
+            scene = scene_,
+        })
+        -- 无论新旧存档，都注入存档回调，确保教程进度变化能触发存档
+        -- TutorialSystem.SetSaveCallback(function()
+        --     BreedingPage.ForceSave()
+        -- end)
+        -- 注入擂台赛教程控制回调
+        -- TutorialSystem.SetArenaTutorialCallbacks({
+        --     pauseCountdown = function()
+        --         ArenaBattle.PauseCountdown()
+        --     end,
+        --     resumeCountdown = function()
+        --         ArenaBattle.ResumeCountdown()
+        --     end,
+        --     setItemBarGlow = function(enabled)
+        --         ArenaBattle.SetItemBarGlow(enabled)
+        --     end,
+        --     unlockFreeItems = function()
+        --         local itemDefs = require("game.ItemSystem").DEFS
+        --         local unlocked = 0
+        --         for i = 1, math.min(3, #itemDefs) do
+        --             local ok = ShopManager.UnlockItemFree(itemDefs[i].id)
+        --             if ok then
+        --                 unlocked = unlocked + 1
+        --                 print(string.format("[Tutorial] 赠送道具: %s", itemDefs[i].name))
+        --             end
+        --         end
+        --         print(string.format("[Tutorial] 共赠送 %d 个道具", unlocked))
+        --     end,
+        --     hasAnyItem = function()
+        --         local itemDefs = require("game.ItemSystem").DEFS
+        --         for i = 1, #itemDefs do
+        --             if ShopManager.HasItem(itemDefs[i].id) then
+        --                 return true
+        --             end
+        --         end
+        --         return false
+        --     end,
+        -- })
+        -- 新存档：显示教程引导吉祥物
+        -- if isNewSave then
+        --     TutorialMascot.Show(
+        --         function()  -- 需要教学
+        --             print("[Tutorial] 玩家选择需要教学，开始教程")
+        --             TutorialSystem.Start(function()
+        --                 print("[Tutorial] 教程全部完成")
+        --                 BreedingPage.ForceSave()
+        --             end)
+        --         end,
+        --         function()  -- 不需要教学（永久禁用此存档所有教程）
+        --             print("[Tutorial] 玩家永久跳过教学")
+        --             TutorialSystem.DeclineAllTutorials()
+        --         end
+        --     )
+        -- end
+        print("[Standalone] Breeding page opened after preload! isNew=" .. tostring(isNewSave))
+    end)
+    print("[Standalone] Breeding loading screen shown!")
 end
 
 function ShowCultivation()
@@ -400,7 +844,9 @@ function ProcessItemAndButtonInput()
         for slot = 1, BOTTOM_BAR.slotCount do
             local sx = slotsX + (slot - 1) * (slotSize + slotGap)
             if HitRect(mx, my, sx, slotsY, slotSize, slotSize) then
-                if ItemSystem.IsReady(slot) then
+                if not ItemSystem.IsUnlocked(slot) then
+                    print(string.format("[Standalone] Slot %d is locked, need to purchase first", slot))
+                elseif ItemSystem.IsReady(slot) then
                     dragItem_ = { slot = slot, startX = mx, startY = my, curX = mx, curY = my }
                 end
                 return  -- consumed
@@ -484,6 +930,9 @@ function StartGame()
             slowTimer = 0,
             slowFactor = 1.0,
             stunTimer = 0,
+            frozenTimer = 0,
+            frozenImmobile = false,
+            frozenCollisionDmg = 0,
         }
         aiStates_[team] = BallAI.CreateState()
     end
@@ -526,6 +975,10 @@ function HandleUpdate(eventType, eventData)
     -- Menu: update animated background
     if gamePhase_ == "menu" then
         StartPage.Update(dt)
+        -- Update loading screen animation timer
+        if loadingActive_ then
+            loadingElapsed_ = loadingElapsed_ + dt
+        end
         return
     end
 
@@ -536,15 +989,36 @@ function HandleUpdate(eventType, eventData)
         return
     end
 
+    -- Breeding loading screen: update animation + wait for preload
+    if gamePhase_ == "breeding_loading" then
+        BreedingLoadingScreen.Update(dt)
+        return
+    end
+
     -- Breeding: delegate to BreedingPage module
     if gamePhase_ == "breeding" then
         local mousePos = input.mousePosition
         local mx, my = ScreenToDesign(mousePos.x, mousePos.y)
         BreedingPage.Update(dt, mx, my)
-        local pressed = input:GetMouseButtonPress(MOUSEB_LEFT)
+        -- 教程系统更新（timer 步骤计时）
+        -- if TutorialSystem.IsActive() then
+        --     TutorialSystem.Update(dt)
+        -- end
+        -- 教程吉祥物更新（鼠标跟踪 + 动画）
+        -- if TutorialMascot.IsActive() then
+        --     TutorialMascot.Update(dt, mx, my, designW, designH)
+        -- end
+        -- 如果 UI 层有打开的弹窗（Modal/Confirm），阻止 NanoVG 自绘层接收点击
+        local uiBlocked = (UI.GetTopOverlay() ~= nil)
+        local pressed = (not uiBlocked) and input:GetMouseButtonPress(MOUSEB_LEFT) or false
+        -- 教程吉祥物优先消耗点击
+        -- if pressed and TutorialMascot.IsActive() then
+        --     local consumed = TutorialMascot.ProcessInput(mx, my, pressed, designW, designH)
+        --     if consumed then pressed = false end
+        -- end
         BreedingPage.ProcessInput(mx, my, pressed)
         -- Continuous mouse tracking for drag-and-drop release detection
-        local mouseDown = input:GetMouseButtonDown(MOUSEB_LEFT)
+        local mouseDown = (not uiBlocked) and input:GetMouseButtonDown(MOUSEB_LEFT) or false
         BreedingPage.ProcessMouseRelease(mouseDown, mx, my)
         return
     end
@@ -614,11 +1088,13 @@ function HandleUpdate(eventType, eventData)
     -- === Item drag & NanoVG button input ===
     ProcessItemAndButtonInput()
 
-    -- Stun blocks shooting
-    if not balls_[1].stunTimer or balls_[1].stunTimer <= 0 then
+    -- Stun / freeze-immobile blocks shooting
+    if (not balls_[1].stunTimer or balls_[1].stunTimer <= 0)
+        and not ItemSystem.IsFrozenImmobile(balls_[1]) then
         ProcessInput(1, dt)
     end
-    if not balls_[2].stunTimer or balls_[2].stunTimer <= 0 then
+    if (not balls_[2].stunTimer or balls_[2].stunTimer <= 0)
+        and not ItemSystem.IsFrozenImmobile(balls_[2]) then
         ProcessInput(2, dt)
     end
 
@@ -730,9 +1206,12 @@ function ProcessInput(team, dt)
     local ai = BallAI.Update(aiStates_[team], ball, opponent, 0, projSpeed, dt)
 
     -- Apply AI movement: blend AI desired velocity into current velocity
-    local lerpFactor = 0.15
-    ball.vx = ball.vx + (ai.moveVX - ball.vx) * lerpFactor
-    ball.vy = ball.vy + (ai.moveVY - ball.vy) * lerpFactor
+    -- 冻结不动时跳过移动
+    if not ItemSystem.IsFrozenImmobile(ball) then
+        local lerpFactor = 0.15
+        ball.vx = ball.vx + (ai.moveVX - ball.vx) * lerpFactor
+        ball.vy = ball.vy + (ai.moveVY - ball.vy) * lerpFactor
+    end
 
     -- AI shooting
     if ai.shoot and skillDef and skillTier then
@@ -787,6 +1266,17 @@ function UpdateBallPhysics(dt)
             hitWall = true
         end
 
+        -- 冻结球撞墙：触发冻结碰撞伤害
+        if hitWall and ItemSystem.IsFrozen(ball) then
+            local fdmg = ItemSystem.OnFrozenCollision(ball)
+            if fdmg and fdmg > 0 then
+                AddDamagePopup(ball.x, ball.y - r - 10, fdmg, 100, 200, 255)
+                SpawnDamageParticles(ball.x, ball.y, fdmg, GetCustom(team).color)
+                ScreenShake(3, 0.1)
+                CheckGameOver()
+            end
+        end
+
         -- Wall slam from beam knockback
         if ball.knockbackTimer > 0 and hitWall and ball.pendingWallSlamDmg > 0 then
             local dmg = ball.pendingWallSlamDmg
@@ -830,6 +1320,21 @@ function UpdateBallPhysics(dt)
                 AddDamagePopup(b2.x, b2.y - r, dmg, 255, 80, 80)
                 SpawnDamageParticles(b1.x, b1.y, dmg, GetCustom(1).color)
                 SpawnDamageParticles(b2.x, b2.y, dmg, GetCustom(2).color)
+
+                -- 冻结球碰撞：解除不动状态 + 额外冻结伤害
+                if ItemSystem.IsFrozen(b1) then
+                    local fdmg = ItemSystem.OnFrozenCollision(b1)
+                    if fdmg and fdmg > 0 then
+                        AddDamagePopup(b1.x, b1.y - r - 15, fdmg, 100, 200, 255)
+                    end
+                end
+                if ItemSystem.IsFrozen(b2) then
+                    local fdmg = ItemSystem.OnFrozenCollision(b2)
+                    if fdmg and fdmg > 0 then
+                        AddDamagePopup(b2.x, b2.y - r - 15, fdmg, 100, 200, 255)
+                    end
+                end
+
                 CheckGameOver()
             end
         end
@@ -1031,6 +1536,87 @@ end
 -- NanoVG Rendering
 -- ============================================================================
 
+-- ============================================================================
+-- Loading Screen Overlay
+-- ============================================================================
+
+function DrawLoadingScreen(w, h)
+    local vg = vg_
+    local t = loadingElapsed_
+
+    -- Semi-transparent dark overlay
+    nvgBeginPath(vg)
+    nvgRect(vg, 0, 0, w, h)
+    nvgFillColor(vg, nvgRGBA(5, 5, 15, 200))
+    nvgFill(vg)
+
+    local cx = w / 2
+    local cy = h / 2 - 30
+
+    -- Spinning dots ring
+    local dotCount = 8
+    local ringRadius = 40
+    local dotRadius = 6
+    for i = 0, dotCount - 1 do
+        local angle = (i / dotCount) * math.pi * 2 - t * 3
+        local dx = cx + math.cos(angle) * ringRadius
+        local dy = cy + math.sin(angle) * ringRadius
+        -- Fade: leading dot is brightest
+        local alpha = math.floor(60 + 195 * ((i + 1) / dotCount))
+        local pulse = 1.0 + 0.2 * math.sin(t * 4 + i * 0.5)
+        nvgBeginPath(vg)
+        nvgCircle(vg, dx, dy, dotRadius * pulse)
+        nvgFillColor(vg, nvgRGBA(100, 180, 255, alpha))
+        nvgFill(vg)
+    end
+
+    -- Bouncing ball in center
+    local ballBounce = math.abs(math.sin(t * 2.5)) * 12
+    local ballCY = cy - ballBounce
+    local ballR = 16
+    -- Ball gradient
+    local innerC = nvgRGBA(255, 200, 80, 255)
+    local outerC = nvgRGBA(220, 140, 30, 255)
+    local grad = nvgRadialGradient(vg, cx - 3, ballCY - 4, 2, ballR, innerC, outerC)
+    nvgBeginPath(vg)
+    nvgCircle(vg, cx, ballCY, ballR)
+    nvgFillPaint(vg, grad)
+    nvgFill(vg)
+    -- Highlight
+    nvgBeginPath(vg)
+    nvgCircle(vg, cx - 4, ballCY - 5, 5)
+    nvgFillColor(vg, nvgRGBA(255, 255, 255, 100))
+    nvgFill(vg)
+    -- Shadow
+    if ballBounce < 2 then
+        local shadowAlpha = math.floor(60 * (1 - ballBounce / 12))
+        nvgBeginPath(vg)
+        nvgEllipse(vg, cx, cy + 4, ballR * 0.8, 3)
+        nvgFillColor(vg, nvgRGBA(0, 0, 0, shadowAlpha))
+        nvgFill(vg)
+    end
+
+    -- Loading text
+    nvgFontFace(vg, "sans")
+    nvgFontSize(vg, 28)
+    nvgTextAlign(vg, NVG_ALIGN_CENTER + NVG_ALIGN_TOP)
+    -- Animated dots
+    local dotAnim = math.floor(t * 2) % 4
+    local dots = string.rep(".", dotAnim)
+    local displayText = loadingText_ .. dots
+    -- Text shadow
+    nvgFillColor(vg, nvgRGBA(0, 0, 0, 180))
+    nvgText(vg, cx + 2, cy + 62, displayText, nil)
+    -- Text
+    nvgFillColor(vg, nvgRGBA(220, 230, 255, 240))
+    nvgText(vg, cx, cy + 60, displayText, nil)
+
+    -- Subtle hint at bottom
+    nvgFontSize(vg, 16)
+    nvgFillColor(vg, nvgRGBA(150, 160, 180, math.floor(120 + 60 * math.sin(t * 1.5))))
+    nvgText(vg, cx, cy + 100, "首次加载可能需要几秒钟", nil)
+end
+
 function DoNanoVGRender()
     nvgScale(vg_, nvgScale_, nvgScale_)
 
@@ -1129,6 +1715,10 @@ function HandleNanoVGRender(eventType, eventData)
         local ok, err = pcall(function()
             nvgScale(vg_, nvgScale_, nvgScale_)
             StartPage.Render(vg_, screenDesignW, screenDesignH, fontNormal_)
+            -- Loading screen overlay (drawn on top of start page)
+            if loadingActive_ then
+                DrawLoadingScreen(screenDesignW, screenDesignH)
+            end
         end)
         nvgEndFrame(vg_)
         if not ok then
@@ -1180,17 +1770,48 @@ function HandleNanoVGRender(eventType, eventData)
         return
     end
 
+    -- Breeding loading screen: render preload animation
+    if gamePhase_ == "breeding_loading" then
+        nvgBeginFrame(vg_, logicalW, logicalH, dpr)
+        local ok, err = pcall(function()
+            nvgScale(vg_, nvgScale_, nvgScale_)
+            nvgTranslate(vg_, designOffsetX, designOffsetY)
+            BreedingLoadingScreen.Render(designW, designH)
+        end)
+        nvgEndFrame(vg_)
+        if not ok then
+            print("[Standalone] Loading screen render error: " .. tostring(err))
+        end
+        return
+    end
+
     -- Breeding: render via BreedingPage module
     if gamePhase_ == "breeding" then
         nvgBeginFrame(vg_, logicalW, logicalH, dpr)
         local ok, err = pcall(function()
             nvgScale(vg_, nvgScale_, nvgScale_)
-            -- Background bubbles
-            nvgBeginPath(vg_); nvgRect(vg_, 0, 0, screenDesignW, screenDesignH)
-            nvgFillColor(vg_, nvgRGBA(8, 8, 14, 255)); nvgFill(vg_)
-            BackgroundBubbles.Draw(vg_)
+            -- Background: full-screen image cover (eliminates black bars)
+            if breedingBgImg_ and breedingBgImg_ > 0 then
+                -- Cover fill: scale image to cover entire screen, center crop
+                local imgW, imgH = nvgImageSize(vg_, breedingBgImg_)
+                local coverScale = math.max(screenDesignW / imgW, screenDesignH / imgH)
+                local drawW = imgW * coverScale
+                local drawH = imgH * coverScale
+                local drawX = (screenDesignW - drawW) / 2
+                local drawY = (screenDesignH - drawH) / 2
+                local bgPat = nvgImagePattern(vg_, drawX, drawY, drawW, drawH, 0, breedingBgImg_, 1.0)
+                nvgBeginPath(vg_); nvgRect(vg_, 0, 0, screenDesignW, screenDesignH)
+                nvgFillPaint(vg_, bgPat); nvgFill(vg_)
+            else
+                nvgBeginPath(vg_); nvgRect(vg_, 0, 0, screenDesignW, screenDesignH)
+                nvgFillColor(vg_, nvgRGBA(100, 160, 60, 255)); nvgFill(vg_)
+            end
             nvgTranslate(vg_, designOffsetX, designOffsetY)
             BreedingPage.Render(vg_, designW, designH, fontNormal_)
+            -- 教程吉祥物渲染（叠加在养殖页最顶层）
+            -- if TutorialMascot.IsActive() then
+            --     TutorialMascot.Render(vg_, designW, designH, fontNormal_)
+            -- end
         end)
         nvgEndFrame(vg_)
         if not ok then
@@ -1327,6 +1948,9 @@ function DrawBalls()
             nvgStrokeColor(vg_, nvgRGBA(120, 255, 50, 120))
             nvgStrokeWidth(vg_, 1.5); nvgStroke(vg_)
         end
+
+        -- Freeze overlay (冻结覆盖效果)
+        ItemSystem.DrawFreezeOverlay(vg_, ball, bx, by, r, 1.0)
 
         -- Stun indicator (旋转星星)
         if ball.stunTimer and ball.stunTimer > 0 then
@@ -1662,45 +2286,70 @@ function DrawBottomBar(w)
         local def = ItemSystem.GetDef(slot)
         local cd = ItemSystem.GetCooldown(slot)
         local ready = ItemSystem.IsReady(slot)
+        local unlocked = ItemSystem.IsUnlocked(slot)
 
         -- Slot background
         nvgBeginPath(vg_); nvgRoundedRect(vg_, sx, sy, slotSize, slotSize, 4 * S)
-        if ready then
+        if not unlocked then
+            nvgFillColor(vg_, nvgRGBA(30, 30, 35, 200))
+        elseif ready then
             nvgFillColor(vg_, nvgRGBA(70, 70, 80, 200))
         else
             nvgFillColor(vg_, nvgRGBA(40, 40, 50, 200))
         end
         nvgFill(vg_)
-        nvgStrokeColor(vg_, nvgRGBA(140, 140, 160, ready and 180 or 80))
+        nvgStrokeColor(vg_, nvgRGBA(140, 140, 160, (not unlocked) and 50 or (ready and 180 or 80)))
         nvgStrokeWidth(vg_, 1.5); nvgStroke(vg_)
 
         if def then
-            -- Emoji icon
-            nvgFontSize(vg_, 22 * S)
-            nvgTextAlign(vg_, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
-            if ready then
-                nvgFillColor(vg_, nvgRGBA(255, 255, 255, 230))
+            if not unlocked then
+                -- Locked state: dimmed icon + lock overlay
+                nvgFontSize(vg_, 22 * S)
+                nvgTextAlign(vg_, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                nvgFillColor(vg_, nvgRGBA(100, 100, 110, 80))
+                nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2 - 4 * S, def.emoji, nil)
+
+                -- Dark overlay
+                nvgBeginPath(vg_); nvgRoundedRect(vg_, sx, sy, slotSize, slotSize, 4 * S)
+                nvgFillColor(vg_, nvgRGBA(0, 0, 0, 120)); nvgFill(vg_)
+
+                -- Lock icon
+                nvgFontSize(vg_, 18 * S)
+                nvgFillColor(vg_, nvgRGBA(255, 200, 80, 200))
+                nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2, "🔒", nil)
+
+                -- Dimmed name
+                nvgFontSize(vg_, 9 * S)
+                nvgFillColor(vg_, nvgRGBA(120, 120, 130, 80))
+                nvgText(vg_, sx + slotSize / 2, sy + slotSize - 6 * S, def.name, nil)
             else
-                nvgFillColor(vg_, nvgRGBA(120, 120, 140, 140))
-            end
-            nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2 - 4 * S, def.emoji, nil)
+                -- Emoji icon
+                nvgFontSize(vg_, 22 * S)
+                nvgTextAlign(vg_, NVG_ALIGN_CENTER + NVG_ALIGN_MIDDLE)
+                if ready then
+                    nvgFillColor(vg_, nvgRGBA(255, 255, 255, 230))
+                else
+                    nvgFillColor(vg_, nvgRGBA(120, 120, 140, 140))
+                end
+                nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2 - 4 * S, def.emoji, nil)
 
-            -- Item name (small, below emoji)
-            nvgFontSize(vg_, 9 * S)
-            nvgFillColor(vg_, nvgRGBA(180, 180, 200, ready and 200 or 100))
-            nvgText(vg_, sx + slotSize / 2, sy + slotSize - 6 * S, def.name, nil)
+                -- Item name (small, below emoji)
+                nvgFontSize(vg_, 9 * S)
+                nvgFillColor(vg_, nvgRGBA(180, 180, 200, ready and 200 or 100))
+                nvgText(vg_, sx + slotSize / 2, sy + slotSize - 6 * S, def.name, nil)
 
-            -- Cooldown overlay
-            if not ready and cd > 0 then
-                local pct = cd / def.cooldown
-                local overlayH = slotSize * pct
-                nvgBeginPath(vg_); nvgRoundedRect(vg_, sx, sy + slotSize - overlayH, slotSize, overlayH, 4 * S)
-                nvgFillColor(vg_, nvgRGBA(0, 0, 0, 130)); nvgFill(vg_)
-                -- CD text
-                nvgFontSize(vg_, 14 * S)
-                nvgFillColor(vg_, nvgRGBA(255, 255, 255, 200))
-                nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2,
-                    string.format("%.0f", math.ceil(cd)), nil)
+                -- Cooldown overlay
+                if not ready and cd > 0 then
+                    local pct = cd / def.cooldown
+                    local overlayH = slotSize * pct
+                    nvgBeginPath(vg_); nvgRoundedRect(vg_, sx, sy + slotSize - overlayH, slotSize, overlayH, 4 * S)
+                    nvgFillColor(vg_, nvgRGBA(0, 0, 0, 130)); nvgFill(vg_)
+                    -- CD text
+                    nvgFontSize(vg_, 14 * S)
+                    nvgFillColor(vg_, nvgRGBA(255, 255, 255, 200))
+                    nvgText(vg_, sx + slotSize / 2, sy + slotSize / 2,
+                        string.format("%.0f", math.ceil(cd)), nil)
+                end
             end
         end
     end

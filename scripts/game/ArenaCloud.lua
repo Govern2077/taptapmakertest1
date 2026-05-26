@@ -10,7 +10,7 @@ local ArenaCloud = {}
 -- Constants
 -- ============================================================================
 
-local FETCH_COUNT       = 20      -- 每次拉取排行榜人数
+local FETCH_COUNT       = 100     -- 每次拉取排行榜人数（取消20人上限）
 local CACHE_TTL         = 5       -- 缓存有效期（秒），实时更新
 local UPLOAD_COOLDOWN   = 3       -- 上传冷却（秒）
 
@@ -205,6 +205,15 @@ function ArenaCloud.FetchPool(onDone)
                 if onDone then onDone(cache_.pool) end
                 return
             end
+
+            -- Sort entries by ball level descending (highest level first)
+            table.sort(entries, function(a, b)
+                local aLv = (a.ball and a.ball.level) or 0
+                local bLv = (b.ball and b.ball.level) or 0
+                if aLv ~= bLv then return aLv > bLv end
+                -- Same level: sort by power descending
+                return (a.power or 0) > (b.power or 0)
+            end)
 
             -- Fetch nicknames
             GetUserNickname({

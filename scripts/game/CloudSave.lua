@@ -9,7 +9,8 @@ local CloudSave = {}
 -- Constants
 -- ============================================================================
 
-local CLOUD_KEY = "breeding_save"  -- 云端存储 key（values 类型，存复杂数据）
+local CLOUD_KEY_PREFIX = "breeding_save"  -- 云端存储 key 前缀
+local CLOUD_KEY_LEGACY = "breeding_save"  -- 旧版单一 key（迁移用）
 local SAVE_COOLDOWN = 10           -- 云存档上传冷却（秒），避免频繁写入
 local VERSION = 2                  -- 存档版本号
 
@@ -17,10 +18,22 @@ local VERSION = 2                  -- 存档版本号
 -- Internal State
 -- ============================================================================
 
+local currentSlot_ = 1             -- 当前存档槽位
 local lastSaveTime_ = 0
 local lastFingerprint_ = ""
 local saving_ = false
 local loading_ = false
+
+--- Get cloud key for a specific slot
+---@param slot number|nil
+---@return string
+local function GetCloudKey(slot)
+    slot = slot or currentSlot_
+    if slot == 1 then
+        return CLOUD_KEY_LEGACY  -- slot 1 uses legacy key for backwards compatibility
+    end
+    return string.format("%s_%d", CLOUD_KEY_PREFIX, slot)
+end
 
 -- ============================================================================
 -- Save (上传到云端)
@@ -74,9 +87,10 @@ function CloudSave.Save(data, onDone, force)
     data.cloudSaveTime = now
 
     saving_ = true
-    print("[CloudSave] Saving to cloud...")
+    local cloudKey = GetCloudKey()
+    print(string.format("[CloudSave] Saving to cloud (slot %d, key=%s)...", currentSlot_, cloudKey))
 
-    clientCloud:Set(CLOUD_KEY, data, {
+    clientCloud:Set(cloudKey, data, {
         ok = function()
             saving_ = false
             lastSaveTime_ = os.time()
@@ -107,12 +121,13 @@ function CloudSave.Load(onDone)
     end
 
     loading_ = true
-    print("[CloudSave] Loading from cloud...")
+    local cloudKey = GetCloudKey()
+    print(string.format("[CloudSave] Loading from cloud (slot %d, key=%s)...", currentSlot_, cloudKey))
 
-    clientCloud:Get(CLOUD_KEY, {
+    clientCloud:Get(cloudKey, {
         ok = function(values, iscores)
             loading_ = false
-            local data = values and values[CLOUD_KEY]
+            local data = values and values[cloudKey]
             if data and type(data) == "table" and data.balls then
                 local ballCount = #data.balls
                 print(string.format("[CloudSave] Cloud load OK (%d balls, gold=%.0f)",
@@ -144,6 +159,34 @@ end
 
 function CloudSave.IsLoading()
     return loading_
+end
+
+--- Set the current save slot for cloud operations
+---@param slot number 1-3
+function CloudSave.SetSlot(slot)
+    currentSlot_ = slot or 1
+    -- Reset fingerprint/cooldown so next save goes through
+    lastFingerprint_ = ""
+    lastSaveTime_ = 0
+    print(string.format("[CloudSave] Slot set to %d (key=%s)", currentSlot_, GetCloudKey()))
+end
+
+--- Delete cloud data for a specific slot (by setting empty table)
+---@param slot number 1-3
+---@param onDone function|nil callback(success)
+function CloudSave.DeleteSlot(slot, onDone)
+    local key = GetCloudKey(slot)
+    print(string.format("[CloudSave] Clearing cloud data for slot %d (key=%s)", slot, key))
+    clientCloud:Set(key, {}, {
+        ok = function()
+            print(string.format("[CloudSave] Cloud slot %d cleared", slot))
+            if onDone then onDone(true) end
+        end,
+        error = function(code, reason)
+            print("[CloudSave] Cloud clear FAILED: " .. tostring(reason))
+            if onDone then onDone(false) end
+        end,
+    })
 end
 
 return CloudSave

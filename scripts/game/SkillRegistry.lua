@@ -135,6 +135,84 @@ local skills = {
 
     -- (激光技能已移除)
 
+    -- 冰刺: 伤害5, CD5s, 反冲力1, 冲击力2
+    -- 碰壁→6颗冰碎片(伤害2), 命中敌人→70%减速3s
+    {
+        id          = "ice_spike",
+        name        = "冰刺",
+        tier        = "normal",
+        icon        = "image/skill_ice_spike_20260520073439.png",
+        description = "冰刺碰壁溅射冰碎片，命中敌人造成强力减速",
+        cooldown    = 5.0,
+        projSpeed   = 520,
+        projRadius  = 9,
+        damage      = 5,
+        knockbackLevel = 1,
+        impactLevel = 2,
+        projType    = "wall_splash",
+        color       = { r = 140, g = 220, b = 255 },
+        params      = {
+            knockback    = 180,
+            splashCount  = 6,
+            splashDamage = 2,
+            splashSpeed  = 260,
+            splashRadius = 4,
+            splashSpread = math.pi,
+            slowFactor   = 0.3,
+            slowDuration = 3.0,
+        },
+    },
+
+    -- 毒雾: 伤害0, CD8s, 反冲力0, 冲击力1
+    -- 极慢漂浮, 6s持续, 到期爆炸→8段DOT(2/s·4s)
+    {
+        id          = "poison_mist",
+        name        = "毒雾",
+        tier        = "normal",
+        icon        = "image/skill_poison_mist_20260520073128.png",
+        description = "漂浮毒雾气泡，到期爆炸释放剧毒",
+        cooldown    = 8.0,
+        projSpeed   = 70,
+        projRadius  = 15,
+        damage      = 0,
+        knockbackLevel = 0,
+        impactLevel = 1,
+        projType    = "bubble",
+        color       = { r = 80, g = 180, b = 50 },
+        params      = {
+            knockback     = 100,
+            lifetime      = 6.0,
+            growthFactor  = 2.5,
+            explodeRadius = 90,
+        },
+    },
+
+    -- 电弧: 伤害7, CD6s, 反冲力2, 冲击力2
+    -- 命中敌人→6DOT(2/s·3s), 碰壁→冲击波(4伤害)
+    {
+        id          = "arc_bolt",
+        name        = "电弧",
+        tier        = "normal",
+        icon        = "image/skill_arc_bolt_20260520073125.png",
+        description = "高速电弧，命中持续麻痹，碰壁放出电击波",
+        cooldown    = 6.0,
+        projSpeed   = 600,
+        projRadius  = 8,
+        damage      = 7,
+        knockbackLevel = 2,
+        impactLevel = 2,
+        projType    = "fire_shot",
+        color       = { r = 180, g = 120, b = 255 },
+        params      = {
+            knockback    = 280,
+            dotTotal     = 6,
+            dotDuration  = 3,
+            wallAoeDamage   = 4,
+            wallAoeRadius   = 85,
+            wallAoeSpeed    = 320,
+        },
+    },
+
     -- ===================== 强化能力 Enhanced Tier (HP 50-30) =====================
 
     -- 水柱: 伤害10, CD8s, 反冲力2, 冲击力3
@@ -232,6 +310,95 @@ local skills = {
         },
     },
 
+    -- 冰柱: 伤害8, CD8s, 反冲力2, 冲击力3
+    -- 碰壁→6颗冰滴(3伤害)+二级溅射, 命中→撞墙8伤害+3s眩晕
+    {
+        id          = "ice_pillar",
+        name        = "冰柱",
+        tier        = "enhanced",
+        icon        = "image/skill_ice_pillar_20260520073125.png",
+        description = "巨型冰柱碰壁二级溅射，命中造成冰冻撞墙+眩晕",
+        cooldown    = 8.0,
+        projSpeed   = 680,
+        projRadius  = 12,
+        damage      = 8,
+        knockbackLevel = 2,
+        impactLevel = 3,
+        projType    = "water_pillar",
+        color       = { r = 100, g = 200, b = 255 },
+        params      = {
+            knockback       = 550,
+            maxBounces      = 2,
+            splashCount     = 6,
+            splashDamage    = 3,
+            splashSpeed     = 280,
+            splashRadius    = 5,
+            splash2Count    = 3,
+            splash2Damage   = 1,
+            splash2Speed    = 180,
+            splash2Radius   = 3,
+            wallSlamDamage  = 8,
+            knockbackWindow = 1.0,
+            stunDuration    = 3.0,
+        },
+    },
+
+    -- 雷蝠: 伤害0, CD10s, 反冲力0, 冲击力0
+    -- 4个雷蝠弹, 追踪吸血, 12DOT/12s, 治疗12
+    {
+        id          = "thunder_bat",
+        name        = "雷蝠",
+        tier        = "enhanced",
+        icon        = "image/skill_thunder_bat_20260520073127.png",
+        description = "释放4只雷蝠，雷电追踪并吸取生命",
+        cooldown    = 10.0,
+        projSpeed   = 320,
+        projRadius  = 5,
+        damage      = 0,
+        knockbackLevel = 0,
+        impactLevel = 0,
+        projType    = "bat_swarm",
+        color       = { r = 200, g = 160, b = 255 },
+        params      = {
+            knockback    = 0,
+            count        = 4,
+            spreadAngle  = 0.7,
+            turnRate     = 0.9,
+            dotTotal     = 12,
+            dotDuration  = 12,
+            healTotal    = 12,
+            lifetime     = 14,
+        },
+    },
+
+    -- 毒焰: 伤害12, CD10s, 反冲力2, 冲击力3
+    -- 追踪, 命中→20DOT(5/s·4s), 碰壁→毒圈12s,5DPS
+    {
+        id          = "venom_flame",
+        name        = "毒焰",
+        tier        = "enhanced",
+        icon        = "image/skill_venom_flame_20260520073123.png",
+        description = "追踪毒焰，命中剧烈中毒，碰壁留毒圈",
+        cooldown    = 10.0,
+        projSpeed   = 380,
+        projRadius  = 14,
+        damage      = 12,
+        knockbackLevel = 2,
+        impactLevel = 3,
+        projType    = "inferno",
+        color       = { r = 120, g = 220, b = 50 },
+        params      = {
+            knockback     = 380,
+            turnRate      = 0.7,
+            dotTotal      = 20,
+            dotDuration   = 4,
+            fireZoneRadius   = 65,
+            fireZoneDuration = 12,
+            fireZoneDps      = 5,
+            fireZoneSlowFactor = 0.35,
+        },
+    },
+
     -- ===================== 终结能力 Ultimate Tier (HP 30-0) =====================
 
     -- 水龙: 伤害10, CD10s, 反冲力2, 冲击力3
@@ -303,6 +470,70 @@ local skills = {
             wallHomingRadius   = 5,
             wallHomingTurnRate = 1.2,
             wallHomingDamage   = 3,
+            wallHomingLife     = 6,
+        },
+    },
+    -- 冰龙: 伤害10, CD10s, 反冲力3, 冲击力3
+    -- 碰壁→8颗冰滴(5伤害), 命中→撞墙12伤害+3s冰冻眩晕
+    {
+        id          = "ice_dragon",
+        name        = "冰龙",
+        tier        = "ultimate",
+        icon        = "image/skill_ice_dragon_20260520073124.png",
+        description = "4颗冰球连体飞行，碰壁爆冰花，命中冰冻撞墙+眩晕",
+        cooldown    = 10.0,
+        projSpeed   = 480,
+        projRadius  = 13,
+        damage      = 10,
+        knockbackLevel = 3,
+        impactLevel = 3,
+        projType    = "water_dragon",
+        color       = { r = 160, g = 230, b = 255 },
+        params      = {
+            knockback       = 850,
+            splashCount     = 8,
+            splashDamage    = 5,
+            splashSpeed     = 260,
+            splashRadius    = 5,
+            splashSpread    = math.pi * 1.2,
+            maxBounces      = 4,
+            waterBallCount  = 4,
+            wallSlamDamage  = 12,
+            knockbackWindow = 1.0,
+            stunDuration    = 3.0,
+        },
+    },
+
+    -- 雷陨: 伤害10, CD10s, 反冲力2, 冲击力3
+    -- 命中→3s眩晕+召唤雷陨(6伤害+冲击波4), 碰壁→4个追踪雷弹(4伤害)
+    {
+        id          = "thunder_meteor",
+        name        = "雷陨",
+        tier        = "ultimate",
+        icon        = "image/skill_thunder_meteor_20260520073129.png",
+        description = "命中定格敌人并召唤雷陨轰炸，碰壁射出追踪雷弹",
+        cooldown    = 10.0,
+        projSpeed   = 520,
+        projRadius  = 12,
+        damage      = 10,
+        knockbackLevel = 2,
+        impactLevel = 3,
+        projType    = "meteorite",
+        color       = { r = 255, g = 220, b = 100 },
+        params      = {
+            knockback       = 450,
+            stunDuration    = 3.0,
+            meteorDelay     = 1.2,
+            meteorDamage    = 6,
+            meteorAoeRadius = 85,
+            meteorAoeDamage = 4,
+            dotTotal        = 12,
+            dotDuration     = 3,
+            wallHomingCount    = 4,
+            wallHomingSpeed    = 360,
+            wallHomingRadius   = 5,
+            wallHomingTurnRate = 1.3,
+            wallHomingDamage   = 4,
             wallHomingLife     = 6,
         },
     },
