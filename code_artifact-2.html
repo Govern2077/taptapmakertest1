@@ -1,0 +1,2069 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电子斗蛐蛐模拟器 - 终极粒子调试版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #06060a;
+            color: #ffffff;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        /* 赛博网格底纹 */
+        .cyber-bg {
+            background-image: linear-gradient(rgba(18, 18, 28, 0.4) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(18, 18, 28, 0.4) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        .hp-bar-container {
+            width: 100%;
+            height: 24px;
+            background-color: #101018;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 2px solid #252538;
+            position: relative;
+        }
+        .hp-fill {
+            height: 100%;
+            transition: width 0.1s ease-out;
+        }
+        #red-hp { background: linear-gradient(90deg, #ff3344, #ff6b8b); }
+        #blue-hp { background: linear-gradient(90deg, #10ac84, #1dd1a1); }
+        .hp-text {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 900;
+            line-height: 20px;
+            text-shadow: 1px 1px 3px rgba(0,0,0,0.9);
+            letter-spacing: 1px;
+        }
+        .panel-card {
+            background: rgba(13, 13, 23, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+        }
+        .skill-btn {
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .skill-btn:disabled {
+            filter: grayscale(0.8);
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        /* 隐藏滚动条 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0d0d17;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #25253e;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="cyber-bg">
+
+    <!-- 游戏主布局容器 -->
+    <div class="w-full max-w-6xl px-4 flex flex-col lg:flex-row gap-6 items-stretch justify-center h-[95vh]">
+        
+        <!-- 左栏：战斗场 + 状态栏 -->
+        <div class="flex-1 flex flex-col justify-between max-w-[600px] h-full">
+            <!-- 顶部标题 -->
+            <div class="flex justify-between items-center pb-2 border-b border-gray-800">
+                <div>
+                    <h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-amber-400 tracking-wider">
+                        CYBER CRICKET
+                    </h1>
+                    <p class="text-[10px] text-gray-500 font-mono">DUMMY TEST STATION v2.5</p>
+                </div>
+                <div class="text-right">
+                    <span class="text-xs font-mono text-gray-400">FPS: <span id="fps-counter" class="text-green-400 font-bold">60</span></span>
+                </div>
+            </div>
+
+            <!-- 血条UI -->
+            <div class="w-full flex justify-between gap-4 mt-2">
+                <div class="flex-1">
+                    <div class="mb-1 text-red-400 font-extrabold flex justify-between text-xs tracking-wider">
+                        <span>红方 (PLAYER)</span>
+                    </div>
+                    <div class="hp-bar-container">
+                        <div id="red-hp" class="hp-fill" style="width: 100%;"></div>
+                        <div id="red-hp-text" class="hp-text">10000 / 10000</div>
+                    </div>
+                </div>
+                <div class="flex-1 text-right">
+                    <div class="mb-1 text-green-400 font-extrabold flex justify-between justify-end gap-2 text-xs tracking-wider">
+                        <span>测试木桩 (DUMMY)</span>
+                    </div>
+                    <div class="hp-bar-container">
+                        <div id="blue-hp" class="hp-fill float-right" style="width: 100%;"></div>
+                        <div id="blue-hp-text" class="hp-text">累计承受伤害: 0</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvas 正方形竞技场 (带红霓虹边框) -->
+            <div id="game-container" class="my-3">
+                <canvas id="arena" width="600" height="600" class="w-full aspect-square !border-[#ff3344] !shadow-[0_0_30px_rgba(255,51,68,0.25),inset_0_0_20px_rgba(255,51,68,0.15)]"></canvas>
+                <div id="game-over" class="absolute inset-0 bg-black/95 flex flex-col items-center justify-center hidden rounded-xl border border-red-950">
+                    <h2 id="winner-text" class="text-3xl font-extrabold mb-6 tracking-widest text-red-500">机体损毁</h2>
+                    <button onclick="resetGame()" class="px-8 py-3 bg-red-600 text-white font-extrabold rounded hover:bg-red-500 transition-all shadow-lg shadow-red-900/30">系统重启</button>
+                </div>
+            </div>
+
+            <!-- 玩家主要技能快捷键面板 -->
+            <div class="grid grid-cols-5 gap-2 pb-1">
+                <button id="btn-melee" onclick="playerCastSkill('melee')" class="skill-btn py-2 bg-red-950/70 hover:bg-red-900 border border-red-800 text-red-200 text-xs font-black rounded transition-all">
+                    <span>1. 粒子光刃</span>
+                    <div id="cd-melee" class="h-0.5 bg-red-400 w-0 mt-1 transition-all"></div>
+                </button>
+                <button id="btn-barrage" onclick="playerCastSkill('barrage')" class="skill-btn py-2 bg-blue-950/70 hover:bg-blue-900 border border-blue-800 text-blue-200 text-xs font-black rounded transition-all">
+                    <span class="element-btn-text">2. 元素射击</span>
+                    <div id="cd-barrage" class="h-0.5 bg-blue-400 w-0 mt-1 transition-all"></div>
+                </button>
+                <button id="btn-trail" onclick="playerCastSkill('trail')" class="skill-btn py-2 bg-amber-950/70 hover:bg-amber-900 border border-amber-800 text-amber-200 text-xs font-black rounded transition-all">
+                    <span>3. 幻影烈焰</span>
+                    <div id="cd-trail" class="h-0.5 bg-amber-400 w-0 mt-1 transition-all"></div>
+                </button>
+                <button id="btn-wallTrap" onclick="playerCastSkill('wallTrap')" class="skill-btn py-2 bg-purple-950/70 hover:bg-purple-900 border border-purple-800 text-purple-200 text-xs font-black rounded transition-all">
+                    <span>4. 电荷地雷</span>
+                    <div id="cd-wallTrap" class="h-0.5 bg-purple-400 w-0 mt-1 transition-all"></div>
+                </button>
+                <button id="btn-sentry" onclick="playerCastSkill('sentry')" class="skill-btn py-2 bg-orange-950/70 hover:bg-orange-900 border border-orange-800 text-orange-200 text-xs font-black rounded transition-all">
+                    <span>5. 壁垒哨兵</span>
+                    <div id="cd-sentry" class="h-0.5 bg-orange-400 w-0 mt-1 transition-all"></div>
+                </button>
+            </div>
+        </div>
+
+        <!-- 右栏：调试控制中心 -->
+        <div class="w-full lg:w-[380px] panel-card rounded-xl p-4 flex flex-col justify-between overflow-y-auto h-full border border-gray-800 font-mono">
+            <div>
+                <div class="text-xs text-amber-400 font-bold tracking-wider uppercase mb-3 pb-1 border-b border-amber-800/50 flex justify-between">
+                    <span>🔧 赛博系统调试面板</span>
+                    <span id="sentry-ammo-badge" class="text-[10px] text-orange-400 hidden">哨兵装填中</span>
+                </div>
+
+                <!-- 1. 元素及阶级调节区 -->
+                <div class="mb-4 bg-black/40 p-3 rounded border border-gray-800">
+                    <span class="text-xs text-gray-400 block mb-2">● 远程技能属性转换</span>
+                    <div class="grid grid-cols-4 gap-1.5 mb-3">
+                        <button onclick="setRangedElement('fire')" id="db-el-fire" class="text-xs py-1 rounded bg-red-950 text-red-400 border border-red-800/50 hover:bg-red-900 transition-all">🔥火</button>
+                        <button onclick="setRangedElement('water')" id="db-el-water" class="text-xs py-1 rounded bg-blue-950 text-blue-400 border border-blue-900/50 hover:bg-blue-900 transition-all">💧水</button>
+                        <button onclick="setRangedElement('thunder')" id="db-el-thunder" class="text-xs py-1 rounded bg-purple-950 text-purple-400 border border-purple-800/50 hover:bg-purple-900 transition-all">⚡雷</button>
+                        <button onclick="setRangedElement('earth')" id="db-el-earth" class="text-xs py-1 rounded bg-amber-950 text-amber-500 border border-amber-800/50 hover:bg-amber-900 transition-all">🪨土</button>
+                    </div>
+
+                    <span class="text-xs text-gray-400 block mb-2">● 技能强度等阶选择</span>
+                    <div class="grid grid-cols-3 gap-1.5">
+                        <button onclick="setSkillTier('basic')" id="tier-basic" class="text-[11px] py-1 bg-gray-800 border border-gray-700 text-white rounded font-bold transition-all">基础技能</button>
+                        <button onclick="setSkillTier('advanced')" id="tier-advanced" class="text-[11px] py-1 bg-gray-800 border border-gray-700 text-white rounded font-bold transition-all text-amber-400">进阶变体</button>
+                        <button onclick="setSkillTier('ultimate')" id="tier-ultimate" class="text-[11px] py-1 bg-gray-800 border border-gray-700 text-white rounded font-bold transition-all text-red-500">终极奥义</button>
+                    </div>
+                    <div class="mt-2.5 p-2 bg-black/60 rounded border border-gray-900">
+                        <span class="text-[10px] text-gray-400 block font-sans" id="skill-desc">火羽神爆：撞墙引发小爆裂。</span>
+                    </div>
+                </div>
+
+                <!-- 2. 系统全局规则 -->
+                <div class="mb-4 bg-black/40 p-3 rounded border border-gray-800">
+                    <span class="text-xs text-gray-400 block mb-2">● 战术核心配置</span>
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs text-gray-300">无限技能 (No CD)</span>
+                        <input type="checkbox" id="toggle-nocd" onchange="toggleNoCD(this.checked)" class="w-4 h-4 accent-red-600">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs text-gray-300">固定木桩 (Frozen)</span>
+                        <input type="checkbox" id="toggle-freeze" onchange="toggleDummyFreeze(this.checked)" class="w-4 h-4 accent-green-600">
+                    </div>
+                </div>
+
+                <!-- 3. 木桩与玩家机能微调 -->
+                <div class="mb-4 bg-black/40 p-3 rounded border border-gray-800 text-xs">
+                    <span class="text-xs text-gray-400 block mb-2">● 物理学参数调节</span>
+                    
+                    <div class="mb-3">
+                        <div class="flex justify-between mb-1">
+                            <span class="text-red-400">红方基础航速</span>
+                            <span id="val-red-speed" class="text-white">5.5</span>
+                        </div>
+                        <input type="range" min="1" max="15" step="0.5" value="5.5" oninput="adjustSpeed('red', this.value)" class="w-full accent-red-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="flex justify-between mb-1">
+                            <span class="text-green-400">木桩运动航速</span>
+                            <span id="val-blue-speed" class="text-white">5.5</span>
+                        </div>
+                        <input type="range" min="0" max="15" step="0.5" value="5.5" oninput="adjustSpeed('blue', this.value)" class="w-full accent-green-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <div class="mb-2">
+                        <div class="flex justify-between mb-1">
+                            <span class="text-purple-400">木桩碰撞体半径</span>
+                            <span id="val-blue-radius" class="text-white">25px</span>
+                        </div>
+                        <input type="range" min="10" max="60" value="25" oninput="adjustRadius('blue', this.value)" class="w-full accent-purple-500 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. 急救与复位功能 -->
+            <div class="bg-black/40 p-3 rounded border border-gray-800">
+                <span class="text-xs text-gray-400 block mb-2">● 紧急应变指令</span>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="emergencyHeal()" class="py-1.5 bg-red-800 hover:bg-red-700 border border-red-600 text-white font-bold text-xs rounded transition-all">红方紧急充能</button>
+                    <button onclick="resetDummyDamage()" class="py-1.5 bg-green-800 hover:bg-green-700 border border-green-600 text-white font-bold text-xs rounded transition-all">木桩受损清零</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('arena');
+const ctx = canvas.getContext('2d');
+const GAME_WIDTH = canvas.width;
+const GAME_HEIGHT = canvas.height;
+
+// 性能保障限制
+const MAX_PARTICLES = 800;
+
+// 游戏状态
+let isGameOver = false;
+let entities = []; 
+let damageTexts = []; 
+let particles = []; 
+let currentRangedElement = 'fire'; 
+let currentSkillTier = 'basic'; 
+let lastTime = performance.now();
+let fps = 60;
+
+// 系统调试配置
+const debugConfig = {
+    noCooldown: false,
+    dummyFrozen: false,
+    redSpeed: 5.5,
+    blueSpeed: 5.5,
+    blueRadius: 25
+};
+
+// 技能介绍说明字典
+const skillDescriptions = {
+    fire: {
+        basic: "🔥 火羽神爆：射出巨型火球，击中木桩或碰触墙壁将直接产生剧烈爆炸伤害。",
+        advanced: "🔥 烈焰新星：高爆火球，撞击墙壁后原地触发烈焰洗礼，并环状喷发 8 枚可反弹的熔岩分裂弹！",
+        ultimate: "🔥 末日审判：激活地裂核心，自天空中连续随机砸下 5 颗地心陨石巨弹，落地产生大范围持续火海。"
+    },
+    water: {
+        basic: "💧 水幕狂澜：高初速水核弹，触墙反作用力爆裂为 10 枚向四周泼洒、带重力下坠的滴水电泳弹。",
+        advanced: "💧 涡流漩涡：重水核弹。撞墙瞬间生成强重力涡流，将木桩吸附绞杀并在原地爆发连环水沫粒子。",
+        ultimate: "💧 海神怒啸：召唤覆盖全竞技场的重型水幕海啸横扫而过，击退并碾压木桩造成毁灭多段暴击伤害。"
+    },
+    thunder: {
+        basic: "⚡ 迅雷狂飙：三角抛射 3 颗磁暴雷球，雷球飞行中会自动穿插不规则连锁闪电链打击障碍。",
+        advanced: "⚡ 宙斯惩戒：朝目标密集溅射 5 颗高能雷光珠，雷球可在墙间弹跳，并在其飞行网格中拉扯出交错雷击电弧。",
+        ultimate: "⚡ 雷霆炼狱：在正中心开启不灭风暴雷云，追踪木桩精准定点降下重型穿刺闪电，爆射白色高能静电星流。"
+    },
+    earth: {
+        basic: "🪨 裂地巨岩：大块岩石，拥有高度物理惯性，撞击墙壁边缘会产生 4 次连续的高速物理弹性折射。",
+        advanced: "🪨 陨星裂变：反弹尖刺岩石。每次折射撞击墙壁，均会在墙壁瞬间炸射出 4 个方向的尖锐裂变飞刀弹幕。",
+        ultimate: "🪨 地崩山摧：从施法者位置向木桩方向发射地碎突刺波，随行进路线越来越大、数量呈扇形递增分裂，直到彻底撞击场地边缘。"
+    }
+};
+
+// 基础物理与数学
+function distance(x1, y1, x2, y2) { return Math.hypot(x2 - x1, y2 - y1); }
+function random(min, max) { return Math.random() * (max - min) + min; }
+
+// 碰撞线段最短距离（用于闪电链判定）
+function sqr(x) { return x * x; }
+function dist2(v, w) { return sqr(v.x - w.x) + sqr(v.y - w.y); }
+function distToSegmentSquared(p, v, w) {
+    let l2 = dist2(v, w);
+    if (l2 == 0) return dist2(p, v);
+    let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    return dist2(p, { x: v.x + t * (w.x - v.x), y: v.y + t * (w.y - v.y) });
+}
+function distToSegment(p, v, w) { return Math.sqrt(distToSegmentSquared(p, v, w)); }
+
+// --- 高级赛博物理粒子类 ---
+class GameParticle {
+    constructor(x, y, vx, vy, options = {}) {
+        this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+        this.radius = options.radius || random(1, 3);
+        this.color = options.color || '#ffffff';
+        this.startColor = this.color;
+        this.endColor = options.endColor || this.color;
+        this.life = options.life || 1.0; 
+        this.decay = options.decay || random(0.01, 0.03);
+        this.gravity = options.gravity || 0;
+        this.friction = options.friction || 0.98;
+        this.type = options.type || 'spark'; // 'spark', 'fire', 'shockwave', 'electric', 'debris'
+        this.angle = options.angle || 0;
+        this.spin = options.spin || 0;
+        this.glow = options.glow !== undefined ? options.glow : true;
+    }
+    update() {
+        this.vx *= this.friction;
+        this.vy *= this.friction;
+        this.vy += this.gravity;
+        this.x += this.vx;
+        this.y += this.vy;
+        this.angle += this.spin;
+        this.life -= this.decay;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life);
+        let currentColor = this.interpolateColor(this.startColor, this.endColor, 1 - this.life);
+
+        if (this.glow) {
+            ctx.shadowBlur = this.radius * 3;
+            ctx.shadowColor = currentColor;
+        }
+
+        switch (this.type) {
+            case 'spark':
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = this.radius;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                ctx.lineTo(this.x - this.vx * 1.5, this.y - this.vy * 1.5);
+                ctx.stroke();
+                break;
+            case 'fire':
+                ctx.fillStyle = currentColor;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * (0.3 + this.life * 0.7), 0, Math.PI * 2);
+                ctx.fill();
+                break;
+            case 'shockwave':
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = 3 * this.life;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius * (1 - this.life), 0, Math.PI * 2);
+                ctx.stroke();
+                break;
+            case 'electric':
+                ctx.strokeStyle = currentColor;
+                ctx.lineWidth = random(1, 2);
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                let steps = 3;
+                let lastX = this.x; let lastY = this.y;
+                for (let i = 0; i < steps; i++) {
+                    let nextX = lastX + random(-8, 8);
+                    let nextY = lastY + random(-8, 8);
+                    ctx.lineTo(nextX, nextY);
+                    lastX = nextX; lastY = nextY;
+                }
+                ctx.stroke();
+                break;
+            case 'debris':
+                ctx.fillStyle = currentColor;
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillRect(-this.radius, -this.radius, this.radius * 2, this.radius * 2);
+                break;
+        }
+        ctx.restore();
+    }
+    interpolateColor(color1, color2, factor) {
+        let parse = (c) => {
+            if (c.startsWith('#')) {
+                if (c.length === 4) return [parseInt(c[1]+c[1], 16), parseInt(c[2]+c[2], 16), parseInt(c[3]+c[3], 16)];
+                return [parseInt(c.substring(1,3), 16), parseInt(c.substring(3,5), 16), parseInt(c.substring(5,7), 16)];
+            }
+            return [255, 255, 255];
+        };
+        let c1 = parse(color1); let c2 = parse(color2);
+        let r = Math.round(c1[0] + factor * (c2[0] - c1[0]));
+        let g = Math.round(c1[1] + factor * (c2[1] - c1[1]));
+        let b = Math.round(c1[2] + factor * (c2[2] - c1[2]));
+        return `rgb(${r},${g},${b})`;
+    }
+}
+
+function spawnParticles(count, creatorFunc) {
+    for (let i = 0; i < count; i++) {
+        if (particles.length >= MAX_PARTICLES) particles.shift();
+        particles.push(creatorFunc());
+    }
+}
+
+// ==========================================
+// 伤害浮空字体类 (DamageText)
+// ==========================================
+class DamageText {
+    constructor(x, y, damage, color = "white", isCrit = false) {
+        this.x = x;
+        this.y = y;
+        this.damage = Math.floor(damage);
+        this.color = color;
+        this.life = 1.0; 
+        this.isCrit = isCrit;
+        this.vy = -random(1.5, 3.0);
+        this.vx = random(-1, 1);
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life -= 0.025;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life);
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = "#000000";
+        ctx.font = this.isCrit ? "bold 24px Impact, sans-serif" : "bold 15px Arial";
+        if (this.isCrit) {
+            ctx.fillStyle = "#ffdf1b"; 
+        }
+        ctx.fillText(this.damage, this.x, this.y);
+        ctx.restore();
+    }
+}
+
+// ============================================================================
+// 技能基类定义
+// ============================================================================
+class Entity {
+    constructor(x, y, radius, color, owner) {
+        this.x = x; this.y = y;
+        this.radius = radius;
+        this.color = color;
+        this.owner = owner; 
+        this.markForDelete = false;
+    }
+    update() {}
+    draw(ctx) {}
+}
+
+// ==========================================
+// 辅助类：水沫散裂分裂体 (WaterDroplet)
+// ==========================================
+class WaterDroplet extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx;
+        this.vy = vy;
+        this.damage = damage;
+        this.life = 45;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.vy += 0.08; // 模拟重力抛物线落水效果
+        this.life--;
+        if (this.life <= 0 || this.x < 0 || this.x > GAME_WIDTH || this.y < 0 || this.y > GAME_HEIGHT) {
+            this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.closePath();
+    }
+}
+
+// ==========================================
+// II. 远程类：标准哨兵粒子（保留作为发射器的粒子结构）
+// ==========================================
+class Projectile extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.life = 120;
+        this.trail = [];
+        this.maxTrailSize = 10;
+    }
+    update() {
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > this.maxTrailSize) {
+            this.trail.shift();
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+        if (this.life <= 0 || this.x < 0 || this.x > GAME_WIDTH || this.y < 0 || this.y > GAME_HEIGHT) {
+            this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        for (let i = 0; i < this.trail.length; i++) {
+            let ratio = (i + 1) / this.trail.length;
+            ctx.beginPath();
+            ctx.arc(this.trail[i].x, this.trail[i].y, this.radius * ratio * 0.8, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.globalAlpha = ratio * 0.4;
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+
+        ctx.save();
+        ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.restore();
+    }
+}
+
+// ============================================================================
+// 元素实体类库
+// ============================================================================
+
+// 基础火：火羽神爆
+class FireProjectile extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius || this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) {
+            this.explode();
+            this.markForDelete = true;
+        }
+    }
+    explode() {
+        let blastRadius = 95;
+        let dist = distance(this.x, this.y, blueFighter.x, blueFighter.y);
+        if (dist < blastRadius + blueFighter.radius) blueFighter.takeDamage(this.damage);
+        spawnParticles(20, () => new GameParticle(this.x, this.y, random(-4, 4), random(-4, 4), {
+            radius: random(2, 5), color: '#ff4d4d', endColor: '#ff9f43', life: 1.0, type: 'fire'
+        }));
+        spawnParticles(1, () => new GameParticle(this.x, this.y, 0, 0, { radius: blastRadius, color: '#ff9f43', endColor: '#ff3344', life: 0.8, type: 'shockwave' }));
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#fffa65'; ctx.fill();
+        ctx.strokeStyle = '#ff3344'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 进阶火：烈焰新星
+class FireNovaBall extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius || this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) {
+            this.novaBurst();
+            this.markForDelete = true;
+        }
+    }
+    novaBurst() {
+        let count = 8;
+        for (let i = 0; i < count; i++) {
+            let angle = (Math.PI * 2 / count) * i;
+            let speed = 4;
+            entities.push(new MiniFireball(this.x, this.y, Math.cos(angle)*speed, Math.sin(angle)*speed, 6, '#ff4757', this.owner, this.damage * 0.4));
+        }
+        spawnParticles(25, () => new GameParticle(this.x, this.y, random(-5, 5), random(-5, 5), { radius: random(3, 6), color: '#ff6b6b', endColor: '#ffffff', life: 1.0, type: 'fire' }));
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 20; ctx.shadowColor = '#ff4757';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = '#ff4757'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 烈焰新星分裂出来的熔岩分裂弹（反弹一次后消失）
+class MiniFireball extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.bounces = 1;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        let bounced = false;
+        if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius) { this.vx *= -1; bounced = true; }
+        if (this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) { this.vy *= -1; bounced = true; }
+        if (bounced) {
+            this.bounces--;
+            if (this.bounces < 0) this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffa502'; ctx.fill();
+    }
+}
+
+// 终极火：末日降临陨石
+class Meteor extends Entity {
+    constructor(targetX, targetY, owner, damage) {
+        // 从上方屏幕外切入
+        let spawnX = targetX + random(-100, 100);
+        super(spawnX, -50, 18, '#ff4757', owner);
+        this.targetX = targetX;
+        this.targetY = targetY;
+        this.damage = damage;
+        // 高速斜向下冲刺
+        this.vx = (targetX - this.x) / 30;
+        this.vy = (targetY - this.y) / 30;
+        this.life = 30;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+        // 拖尾
+        spawnParticles(2, () => new GameParticle(this.x, this.y, random(-1, 1), random(-1, 1), {
+            radius: random(3, 7), color: '#ff3344', endColor: '#ffa502', life: 0.8, type: 'fire'
+        }));
+        if (this.life <= 0) {
+            this.explode();
+            this.markForDelete = true;
+        }
+    }
+    explode() {
+        let blastRadius = 140;
+        let dist = distance(this.x, this.y, blueFighter.x, blueFighter.y);
+        if (dist < blastRadius + blueFighter.radius) blueFighter.takeDamage(this.damage);
+        
+        spawnParticles(40, () => {
+            let angle = random(0, Math.PI*2);
+            let speed = random(1.5, 7.5);
+            return new GameParticle(this.x, this.y, Math.cos(angle)*speed, Math.sin(angle)*speed, {
+                radius: random(3, 8), color: '#ff3344', endColor: '#ffbe76', life: 1.0, type: 'fire'
+            });
+        });
+        spawnParticles(1, () => new GameParticle(this.x, this.y, 0, 0, { radius: blastRadius, color: '#ff9f43', endColor: '#ff0000', life: 1.0, type: 'shockwave' }));
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 25; ctx.shadowColor = '#ff3344';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = '#ff9f43'; ctx.lineWidth = 4; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 基础水：水幕狂澜 (Splatter)
+class WaterProjectile extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius || this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) {
+            this.splatter();
+            this.markForDelete = true;
+        }
+    }
+    splatter() {
+        let baseAngle = Math.atan2(-this.vy, -this.vx);
+        for (let i = 0; i < 10; i++) {
+            let angle = baseAngle + random(-0.8, 0.8);
+            let speed = random(3, 7);
+            entities.push(new WaterDroplet(this.x, this.y, Math.cos(angle)*speed, Math.sin(angle)*speed, 4, '#1e90ff', this.owner, this.damage*0.35));
+        }
+        spawnParticles(15, () => new GameParticle(this.x, this.y, random(-3,3), random(-3,3), { radius: random(2, 4), color: '#70a1ff', endColor: '#1e90ff', life: 0.8, gravity: 0.08, type: 'fire' }));
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#1e90ff';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = '#1e90ff'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 进阶水：重力漩涡核 (Vortex)
+class WaterVortexCore extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius || this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) {
+            entities.push(new WaterVortexField(this.x, this.y, this.owner, this.damage));
+            this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#10ac84';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = '#10ac84'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+class WaterVortexField extends Entity {
+    constructor(x, y, owner, damage) {
+        super(x, y, 10, '#10ac84', owner);
+        this.damage = damage;
+        this.life = 180; // 3秒
+        this.maxRadius = 140;
+        this.spinAngle = 0;
+    }
+    update() {
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+        this.spinAngle += 0.15;
+
+        // 强引力抓捕木桩
+        let dx = this.x - blueFighter.x;
+        let dy = this.y - blueFighter.y;
+        let dist = distance(this.x, this.y, blueFighter.x, blueFighter.y);
+        
+        if (dist < this.maxRadius) {
+            let pullForce = (this.maxRadius - dist) * 0.08;
+            blueFighter.vx += (dx / dist) * pullForce;
+            blueFighter.vy += (dy / dist) * pullForce;
+            let rotX = -(dy / dist) * pullForce * 0.5;
+            let rotY = (dx / dist) * pullForce * 0.5;
+            blueFighter.vx += rotX;
+            blueFighter.vy += rotY;
+
+            if (this.life % 6 === 0) blueFighter.takeDamage(this.damage * 0.15);
+        }
+
+        if (Math.random() < 0.4) {
+            let pAngle = random(0, Math.PI*2);
+            let pDist = random(20, this.maxRadius);
+            let px = this.x + Math.cos(pAngle)*pDist;
+            let py = this.y + Math.sin(pAngle)*pDist;
+            let pvx = -Math.cos(pAngle)*2 - Math.sin(pAngle)*1.5;
+            let pvy = -Math.sin(pAngle)*2 + Math.cos(pAngle)*1.5;
+            spawnParticles(1, () => new GameParticle(px, py, pvx, pvy, { radius: random(1.5, 3), color: '#54a0ff', endColor: '#ffffff', life: 0.6, type: 'fire' }));
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = 0.3 * (this.life / 180);
+        ctx.shadowBlur = 20; ctx.shadowColor = '#54a0ff';
+        ctx.strokeStyle = '#54a0ff';
+        ctx.lineWidth = 3;
+        for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            let start = this.spinAngle + (i * Math.PI * 0.6);
+            ctx.arc(this.x, this.y, this.maxRadius * 0.7, start, start + Math.PI, false);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+}
+
+// 终极水：海啸横扫
+class TidalWave extends Entity {
+    constructor(owner, damage) {
+        let startX = owner.vx > 0 ? 0 : GAME_WIDTH;
+        super(startX, GAME_HEIGHT/2, 35, '#2e86de', owner);
+        this.dir = owner.vx > 0 ? 1 : -1;
+        this.damage = damage;
+        this.speed = 4.5;
+        this.waveLength = GAME_HEIGHT;
+        this.hasHit = false;
+        this.waveX = startX;
+    }
+    update() {
+        this.waveX += this.speed * this.dir;
+        this.x = this.waveX;
+
+        let distToDummyX = Math.abs(blueFighter.x - this.waveX);
+        if (distToDummyX < this.radius + blueFighter.radius && !this.hasHit) {
+            blueFighter.takeDamage(this.damage);
+            blueFighter.vx = this.dir * 18;
+            this.hasHit = true; 
+        }
+
+        spawnParticles(5, () => {
+            let py = random(0, GAME_HEIGHT);
+            return new GameParticle(this.waveX, py, -this.dir*random(2, 6), random(-3, 3), {
+                radius: random(3, 8), color: '#54a0ff', endColor: '#ffffff', life: 0.9, type: 'fire'
+            });
+        });
+
+        if ((this.dir === 1 && this.waveX > GAME_WIDTH + 100) || (this.dir === -1 && this.waveX < -100)) {
+            this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 30; ctx.shadowColor = '#54a0ff';
+        ctx.fillStyle = 'rgba(46, 134, 222, 0.45)';
+        ctx.fillRect(this.waveX - this.radius, 0, this.radius * 2, GAME_HEIGHT);
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(this.waveX, 0); ctx.lineTo(this.waveX, GAME_HEIGHT);
+        ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 基础雷：雷击散射球
+class ThunderBall extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.life = 90;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+        if (Math.random() < 0.2) {
+            spawnParticles(1, () => new GameParticle(this.x, this.y, 0, 0, { radius: 1, color: '#ffffff', endColor: '#a29bfe', life: 0.4, type: 'electric' }));
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = this.color; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 进阶雷：蛛网雷爆球 (宙斯惩戒)
+class AdvancedThunderBall extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.bounces = 3; 
+        this.life = 160;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+
+        let bounced = false;
+        if (this.x - this.radius <= 0) { this.x = this.radius; this.vx *= -1; bounced = true; }
+        if (this.x + this.radius >= GAME_WIDTH) { this.x = GAME_WIDTH - this.radius; this.vx *= -1; bounced = true; }
+        if (this.y - this.radius <= 0) { this.y = this.radius; this.vy *= -1; bounced = true; }
+        if (this.y + this.radius >= GAME_HEIGHT) { this.y = GAME_HEIGHT - this.radius; this.vy *= -1; bounced = true; }
+
+        if (bounced) {
+            this.bounces--;
+            if (this.bounces < 0) this.markForDelete = true;
+            spawnParticles(8, () => new GameParticle(this.x, this.y, random(-4, 4), random(-4, 4), { radius: random(1.5, 3), color: '#ffffff', endColor: '#8c7ae6', life: 0.6, type: 'spark' }));
+        }
+        if (this.life <= 0) this.markForDelete = true;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#00a8ff';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#ffffff'; ctx.fill();
+        ctx.strokeStyle = '#00a8ff'; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 终极雷：雷霆风暴眼 (Storm Cloud)
+class ThunderStormCloud extends Entity {
+    constructor(targetX, targetY, owner, damage) {
+        super(GAME_WIDTH/2, 100, 45, '#3f3151', owner);
+        this.target = blueFighter;
+        this.damage = damage;
+        this.life = 240; 
+        this.boltCooldown = 0;
+    }
+    update() {
+        this.life--;
+        if (this.life <= 0) {
+            this.markForDelete = true;
+            return;
+        }
+
+        if (this.boltCooldown > 0) {
+            this.boltCooldown--;
+        } else {
+            this.strikeLightning();
+            this.boltCooldown = 20; 
+        }
+    }
+    strikeLightning() {
+        let tX = this.target.x + random(-15, 15);
+        let tY = this.target.y + random(-15, 15);
+
+        let dist = distance(tX, tY, this.target.x, this.target.y);
+        if (dist < this.target.radius + 30) {
+            this.target.takeDamage(this.damage * 0.35);
+        }
+
+        drawLightningArc(ctx, this.x, this.y, tX, tY, '#a29bfe');
+
+        spawnParticles(12, () => new GameParticle(tX, tY, random(-5, 5), random(-5, 5), {
+            radius: random(2, 4.5), color: '#ffffff', endColor: '#9b5de5', life: 0.8, type: 'spark'
+        }));
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 30; ctx.shadowColor = '#9b5de5';
+        ctx.fillStyle = 'rgba(155, 93, 229, 0.25)';
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 基础土：裂地巨岩
+class EarthProjectile extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.bounces = 4;
+        this.trail = [];
+    }
+    update() {
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > 8) this.trail.shift();
+
+        this.x += this.vx; this.y += this.vy;
+
+        let bounced = false;
+        let hitX = this.x; let hitY = this.y;
+
+        if (this.x - this.radius <= 0) { this.x = this.radius; this.vx *= -1; bounced = true; hitX = 0; }
+        if (this.x + this.radius >= GAME_WIDTH) { this.x = GAME_WIDTH - this.radius; this.vx *= -1; bounced = true; hitX = GAME_WIDTH; }
+        if (this.y - this.radius <= 0) { this.y = this.radius; this.vy *= -1; bounced = true; hitY = 0; }
+        if (this.y + this.radius >= GAME_HEIGHT) { this.y = GAME_HEIGHT - this.radius; this.vy *= -1; bounced = true; hitY = GAME_HEIGHT; }
+
+        if (bounced) {
+            this.bounces--;
+            spawnParticles(10, () => new GameParticle(hitX, hitY, random(-3,3), random(-3,3), { radius: random(2, 5), color: '#d1ccc0', endColor: '#2f3542', life: 0.8, type: 'debris' }));
+            if (this.bounces <= 0) this.markForDelete = true;
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#9f9f9f'; ctx.fill();
+        ctx.strokeStyle = this.color; ctx.lineWidth = 3; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+// 进阶土：陨星裂变岩
+class EarthShatterProjectile extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.bounces = 3;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+
+        let bounced = false;
+        let hitX = this.x; let hitY = this.y;
+
+        if (this.x - this.radius <= 0) { this.x = this.radius; this.vx *= -1; bounced = true; hitX = 0; }
+        if (this.x + this.radius >= GAME_WIDTH) { this.x = GAME_WIDTH - this.radius; this.vx *= -1; bounced = true; hitX = GAME_WIDTH; }
+        if (this.y - this.radius <= 0) { this.y = this.radius; this.vy *= -1; bounced = true; hitY = 0; }
+        if (this.y + this.radius >= GAME_HEIGHT) { this.y = GAME_HEIGHT - this.radius; this.vy *= -1; bounced = true; hitY = GAME_HEIGHT; }
+
+        if (bounced) {
+            this.bounces--;
+            this.shatterSpike(); 
+            spawnParticles(12, () => new GameParticle(hitX, hitY, random(-3, 3), random(-3, 3), { radius: random(2, 5), color: '#f5cd79', endColor: '#303a52', life: 0.8, type: 'debris' }));
+            if (this.bounces <= 0) this.markForDelete = true;
+        }
+    }
+    shatterSpike() {
+        let angles = [0, Math.PI/2, Math.PI, -Math.PI/2];
+        angles.forEach(ang => {
+            let speed = 5.5;
+            entities.push(new EarthSpikeShard(this.x, this.y, Math.cos(ang)*speed, Math.sin(ang)*speed, 5, '#eccc68', this.owner, this.damage*0.3));
+        });
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#eccc68';
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = '#747d8c'; ctx.fill();
+        ctx.strokeStyle = '#eccc68'; ctx.lineWidth = 3; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+class EarthSpikeShard extends Entity {
+    constructor(x, y, vx, vy, radius, color, owner, damage) {
+        super(x, y, radius, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.life = 70;
+    }
+    update() {
+        this.x += this.vx;
+        this.y += this.vy;
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI*2);
+        ctx.fillStyle = this.color; ctx.fill();
+        ctx.restore();
+    }
+}
+
+// 终极土：地崩突刺 (Earth Spikes Eruption) —— 沿弹道连续生成突刺，直到撞墙
+class EarthSpikeSpawner extends Entity {
+    constructor(owner, target, damage) {
+        super(owner.x, owner.y, 1, '#ffbe76', owner);
+        this.target = target;
+        this.damage = damage;
+        this.startX = owner.x; 
+        this.startY = owner.y;
+
+        // 计算朝向木桩的单位矢量
+        let dx = target.x - owner.x;
+        let dy = target.y - owner.y;
+        let len = Math.hypot(dx, dy);
+        if (len === 0) { dx = 1; dy = 0; len = 1; }
+        this.ux = dx / len;
+        this.uy = dy / len;
+
+        // 计算沿着这个方向行进到场地边缘的最大距离 (tMax)
+        let tMax = Infinity;
+        if (this.ux > 0) tMax = Math.min(tMax, (GAME_WIDTH - this.startX) / this.ux);
+        if (this.ux < 0) tMax = Math.min(tMax, (0 - this.startX) / this.ux);
+        if (this.uy > 0) tMax = Math.min(tMax, (GAME_HEIGHT - this.startY) / this.uy);
+        if (this.uy < 0) tMax = Math.min(tMax, (0 - this.startY) / this.uy);
+
+        this.stepDistance = 35; // 每一个突刺波行进跨度
+        this.steps = Math.ceil(tMax / this.stepDistance); // 直至撞墙的总步数
+        this.currentStep = 0;
+        this.cooldown = 0;
+    }
+    update() {
+        if (this.currentStep >= this.steps) {
+            this.markForDelete = true;
+            return;
+        }
+
+        if (this.cooldown > 0) {
+            this.cooldown--;
+        } else {
+            // 当前行进层级的圆心位置
+            let dist = (this.currentStep + 1) * this.stepDistance;
+            let centerX = this.startX + this.ux * dist;
+            let centerY = this.startY + this.uy * dist;
+
+            // 越生成越多配置：
+            // 突刺数量随行进路线梯度增加
+            let count = 1 + Math.floor(this.currentStep / 3); // 1, 1, 1, 2, 2, 2, 3, 3, 3...
+            // 突刺体积（半径）越往前越大
+            let baseRadius = 15 + this.currentStep * 2.5; // 从15px渐进生长到40px+
+
+            // 计算垂直推进方向的法矢量以控制并排扇形铺开
+            let px = -this.uy;
+            let py = this.ux;
+            let spreadSpacing = baseRadius * 0.9; // 并排间距
+
+            let isFinal = (this.currentStep === this.steps - 1);
+
+            for (let j = 0; j < count; j++) {
+                let offset = (j - (count - 1) / 2) * spreadSpacing;
+                let spawnX = centerX + px * offset;
+                let spawnY = centerY + py * offset;
+
+                // 确保在合法的格子边缘内才召唤
+                if (spawnX >= 0 && spawnX <= GAME_WIDTH && spawnY >= 0 && spawnY <= GAME_HEIGHT) {
+                    entities.push(new SingleSpikeEruption(spawnX, spawnY, this.owner, this.damage * 0.22, baseRadius, isFinal));
+
+                    // 大地撕裂的重泥沙飞扬粒子
+                    spawnParticles(5, () => new GameParticle(spawnX, spawnY, random(-3, 3), random(-3, 3), {
+                        radius: random(2, 5.5),
+                        color: '#ffeaa7',
+                        endColor: '#303952',
+                        life: 0.8,
+                        decay: 0.03,
+                        gravity: 0.12,
+                        type: 'debris'
+                    }));
+                }
+            }
+
+            this.currentStep++;
+            this.cooldown = 4; // 控制波纹翻滚的翻卷推进频率
+        }
+    }
+}
+
+class SingleSpikeEruption extends Entity {
+    constructor(x, y, owner, damage, radius, isFinal = false) {
+        super(x, y, radius, '#ffeaa7', owner);
+        this.damage = damage;
+        this.life = 25;
+        this.maxLife = 25;
+        this.isFinal = isFinal;
+        this.hasHit = false;
+    }
+    update() {
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+
+        if (!this.hasHit) {
+            let dist = distance(this.x, this.y, blueFighter.x, blueFighter.y);
+            if (dist < this.radius + blueFighter.radius) {
+                blueFighter.takeDamage(this.damage);
+                this.hasHit = true;
+                if (this.isFinal) {
+                    blueFighter.vx = 0; blueFighter.vy = 0;
+                }
+            }
+        }
+    }
+    draw(ctx) {
+        let progress = 1 - (this.life / this.maxLife);
+        let currentHeight = (progress < 0.5 ? progress * 2 : (1 - progress) * 2) * this.radius * 1.5;
+
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = '#f5cd79';
+        ctx.fillStyle = '#ffeaa7';
+        ctx.beginPath();
+        ctx.moveTo(this.x - this.radius, this.y);
+        ctx.lineTo(this.x, this.y - currentHeight);
+        ctx.lineTo(this.x + this.radius, this.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = '#eccc68'; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.restore();
+    }
+}
+
+
+// ==========================================
+// I. 近战类：挥舞光刃带粒子扇区弧 (LightBlade)
+// ==========================================
+class LightBlade extends Entity {
+    constructor(owner, target, damage) {
+        super(owner.x, owner.y, 130, owner.color, owner); 
+        this.target = target;
+        this.damage = damage;
+        this.life = 18; 
+        this.maxLife = 18;
+        this.baseAngle = Math.atan2(target.y - owner.y, target.x - owner.x);
+        this.sweepAngle = Math.PI * 1.3; 
+        this.hasHit = false;
+    }
+    update() {
+        this.x = this.owner.x;
+        this.y = this.owner.y;
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+    }
+    draw(ctx) {
+        let progress = 1 - (this.life / this.maxLife);
+        let currentAngle = this.baseAngle - (this.sweepAngle / 2) + (this.sweepAngle * progress);
+
+        let endX = this.x + Math.cos(currentAngle) * this.radius;
+        let endY = this.y + Math.sin(currentAngle) * this.radius;
+
+        spawnParticles(2, () => new GameParticle(endX, endY, random(-2, 2) + this.owner.vx, random(-2, 2) + this.owner.vy, {
+            radius: random(1.5, 3.5), color: this.color, endColor: '#ffffff', life: 0.8, decay: 0.04, type: 'spark'
+        }));
+
+        ctx.save();
+        ctx.shadowBlur = 25; ctx.shadowColor = this.color;
+        ctx.strokeStyle = this.color; ctx.lineWidth = 7; ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(endX, endY); ctx.stroke();
+
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(this.x, this.y); ctx.lineTo(endX, endY); ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius * 0.95, this.baseAngle - (this.sweepAngle / 2), currentAngle, false);
+        ctx.strokeStyle = this.color; ctx.lineWidth = 3; ctx.globalAlpha = 0.25 * (1 - progress); ctx.stroke();
+        ctx.restore();
+
+        if (!this.hasHit) {
+            let dist = distance(this.owner.x, this.owner.y, this.target.x, this.target.y);
+            if (dist <= this.radius + this.target.radius) {
+                let angleToTarget = Math.atan2(this.target.y - this.owner.y, this.target.x - this.owner.x);
+                let angleDiff = Math.atan2(Math.sin(angleToTarget - currentAngle), Math.cos(angleToTarget - currentAngle));
+                if (Math.abs(angleDiff) < 0.3) { 
+                    this.target.takeDamage(this.damage);
+                    this.hasHit = true;
+                    
+                    spawnParticles(25, () => new GameParticle(this.target.x, this.target.y, random(-8, 8), random(-8, 8), {
+                        radius: random(2, 4), color: this.color, endColor: '#fffca3', life: 1.0, decay: 0.03, friction: 0.96, type: 'spark'
+                    }));
+                    spawnParticles(1, () => new GameParticle(this.target.x, this.target.y, 0, 0, { radius: 130, color: '#ffffff', endColor: '#ffffff', life: 1.0, decay: 0.04, type: 'shockwave' }));
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
+// IV. 陷阱类：脉冲电磁地雷 (WallTrap)
+// ==========================================
+class WallTrap extends Entity {
+    constructor(x, y, vx, vy, color, owner, damage) {
+        super(x, y, 6, color, owner);
+        this.vx = vx; this.vy = vy; this.damage = damage;
+        this.isAttached = false; this.life = 400; 
+    }
+    update() {
+        if (!this.isAttached) {
+            this.x += this.vx; this.y += this.vy;
+            if (this.x <= this.radius || this.x >= GAME_WIDTH - this.radius || this.y <= this.radius || this.y >= GAME_HEIGHT - this.radius) {
+                this.isAttached = true;
+                this.vx = 0; this.vy = 0;
+                if (this.x <= this.radius) this.x = 0;
+                if (this.x >= GAME_WIDTH - this.radius) this.x = GAME_WIDTH;
+                if (this.y <= this.radius) this.y = 0;
+                if (this.y >= GAME_HEIGHT - this.radius) this.y = GAME_HEIGHT;
+
+                spawnParticles(10, () => new GameParticle(this.x, this.y, random(-3, 3), random(-3, 3), { radius: random(1, 2.5), color: '#ffffff', endColor: this.color, life: 0.8, type: 'spark' }));
+            }
+        } else {
+            this.radius = 35 + Math.sin(this.life * 0.15) * 6;
+            this.life--;
+            if (this.life <= 0) this.markForDelete = true;
+
+            if (this.life % 15 === 0) {
+                spawnParticles(2, () => new GameParticle(this.x + random(-15, 15), this.y + random(-15, 15), 0, 0, { radius: 1, color: '#9b5de5', endColor: '#ffffff', life: 0.4, type: 'electric' }));
+            }
+        }
+    }
+    draw(ctx) {
+        ctx.beginPath();
+        if (!this.isAttached) {
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = "#ffffff"; ctx.fill();
+        } else {
+            ctx.save();
+            ctx.shadowBlur = 15; ctx.shadowColor = this.color;
+            ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.globalAlpha = 0.35 + Math.sin(this.life * 0.15) * 0.2;
+            ctx.fill();
+            ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.stroke();
+            ctx.restore();
+        }
+        ctx.globalAlpha = 1.0; ctx.closePath();
+    }
+}
+
+// ==========================================
+// III. 拖尾类：热流升腾烈焰羽流 (Trail)
+// ==========================================
+class Trail extends Entity {
+    constructor(x, y, color, owner, damage) {
+        super(x, y, 22, color, owner);
+        this.damage = damage; this.life = 70;
+    }
+    update() {
+        this.radius *= 0.97;
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+
+        if (Math.random() < 0.5) {
+            spawnParticles(1, () => new GameParticle(this.x + random(-5, 5), this.y + random(-5, 5), random(-0.5, 0.5), -random(1, 2.5), {
+                radius: random(1.5, 3), color: this.color, endColor: '#ff9f43', life: 0.8, gravity: -0.05, type: 'fire'
+            }));
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color; ctx.globalAlpha = (this.life / 70) * 0.5;
+        ctx.shadowBlur = 12; ctx.shadowColor = this.color; ctx.fill();
+        ctx.restore();
+    }
+}
+
+// ==========================================
+// V. 碰壁触发类：壁垒哨兵发射机 (Sentry)
+// ==========================================
+class Sentry extends Entity {
+    constructor(x, y, color, owner, target) {
+        super(x, y, 16, color, owner);
+        this.target = target;
+        this.life = 250; 
+        this.fireCooldown = 0;
+    }
+    update() {
+        this.life--;
+        if (this.life <= 0) this.markForDelete = true;
+
+        if (this.fireCooldown > 0) {
+            this.fireCooldown--;
+        } else {
+            let angle = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+            let speed = 12;
+            entities.push(new Projectile(this.x, this.y, Math.cos(angle)*speed, Math.sin(angle)*speed, 4, "#ff9f43", this.owner, 70));
+            this.fireCooldown = 15; 
+
+            let muzzleX = this.x + Math.cos(angle) * 18;
+            let muzzleY = this.y + Math.sin(angle) * 18;
+            spawnParticles(4, () => new GameParticle(muzzleX, muzzleY, Math.cos(angle)*3 + random(-1, 1), Math.sin(angle)*3 + random(-1, 1), {
+                radius: random(1, 2), color: '#fff', endColor: '#ff9f43', life: 0.6, type: 'spark'
+            }));
+        }
+    }
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 18; ctx.shadowColor = this.color;
+        let angleToTarget = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+
+        ctx.beginPath();
+        let size = 18;
+        let p1x = this.x + Math.cos(angleToTarget) * size;
+        let p1y = this.y + Math.sin(angleToTarget) * size;
+        let p2x = this.x + Math.cos(angleToTarget + Math.PI * 0.75) * (size * 0.7);
+        let p2y = this.y + Math.sin(angleToTarget + Math.PI * 0.75) * (size * 0.7);
+        let p3x = this.x + Math.cos(angleToTarget - Math.PI * 0.75) * (size * 0.7);
+        let p3y = this.y + Math.sin(angleToTarget - Math.PI * 0.75) * (size * 0.7);
+
+        ctx.moveTo(p1x, p1y); ctx.lineTo(p2x, p2y); ctx.lineTo(p3x, p3y); ctx.closePath();
+        ctx.fillStyle = this.color; ctx.fill();
+        ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 1.5; ctx.stroke();
+
+        ctx.beginPath(); ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffffff"; ctx.fill();
+        ctx.restore();
+    }
+}
+
+// --- 斗蛐蛐主体 (Fighter) ---
+class Fighter {
+    constructor(name, x, y, color, isPlayer = false, isDummy = false) {
+        this.name = name;
+        this.x = x; this.y = y;
+        this.radius = isDummy ? debugConfig.blueRadius : 25;
+        this.color = color;
+        this.isPlayer = isPlayer;
+        this.isDummy = isDummy; 
+        
+        this.vx = random(4, 7) * (Math.random() < 0.5 ? 1 : -1);
+        this.vy = random(4, 7) * (Math.random() < 0.5 ? 1 : -1);
+        
+        this.maxHp = 10000;
+        this.hp = this.maxHp;
+        this.totalDamageTaken = 0; 
+        this.currentRangedElement = 'fire'; 
+        
+        this.cooldowns = { barrage: 0, melee: 0, wallTrap: 0, trail: 0, sentry: 0 };
+        this.maxCooldowns = { barrage: 90, melee: 130, wallTrap: 160, trail: 200, sentry: 300 };
+        
+        this.trailDuration = 0; 
+        this.sentryAmmo = 0; 
+        this.baseSpeed = isDummy ? debugConfig.blueSpeed : debugConfig.redSpeed;
+    }
+
+    takeDamage(amount) {
+        let isCrit = Math.random() < 0.22;
+        let finalDmg = isCrit ? amount * 1.6 : amount;
+        damageTexts.push(new DamageText(this.x, this.y - this.radius, finalDmg, this.color, isCrit));
+        
+        spawnParticles(6, () => new GameParticle(this.x, this.y, random(-5, 5), random(-5, 5), {
+            radius: random(1.5, 3), color: this.color, endColor: '#ffffff', life: 0.9, type: 'spark'
+        }));
+
+        if (this.isDummy) {
+            this.totalDamageTaken += finalDmg;
+            return;
+        }
+
+        this.hp -= amount;
+        if (this.hp <= 0) {
+            this.hp = 0;
+            endGame("训练木桩"); 
+        }
+    }
+
+    update(enemy) {
+        this.baseSpeed = this.isDummy ? debugConfig.blueSpeed : debugConfig.redSpeed;
+        this.radius = this.isDummy ? debugConfig.blueRadius : 25;
+
+        // 木桩冻结判断
+        if (this.isDummy && debugConfig.dummyFrozen) {
+            this.vx = 0; this.vy = 0;
+        } else {
+            this.x += this.vx;
+            this.y += this.vy;
+        }
+
+        // 碰墙
+        let hitWall = false;
+        let hitX = this.x; let hitY = this.y;
+        let wallDirX = 0; let wallDirY = 0;
+
+        if (this.x - this.radius <= 0) { this.x = this.radius; this.vx *= -1; hitWall = true; hitX = 0; wallDirX = 1; }
+        if (this.x + this.radius >= GAME_WIDTH) { this.x = GAME_WIDTH - this.radius; this.vx *= -1; hitWall = true; hitX = GAME_WIDTH; wallDirX = -1; }
+        if (this.y - this.radius <= 0) { this.y = this.radius; this.vy *= -1; hitWall = true; hitX = this.x; wallDirY = 1; }
+        if (this.y + this.radius >= GAME_HEIGHT) { this.y = GAME_HEIGHT - this.radius; this.vy *= -1; hitWall = true; hitX = this.x; wallDirY = -1; }
+
+        if (hitWall) {
+            if (this.sentryAmmo > 0) {
+                entities.push(new Sentry(hitX, hitY, "#ffa502", this, enemy));
+                this.sentryAmmo--;
+                
+                spawnParticles(20, () => new GameParticle(hitX, hitY, random(-2, 2) + wallDirX * random(2, 6), random(-2, 2) + wallDirY * random(2, 6), {
+                    radius: random(2, 5), color: '#ffa502', endColor: '#2c3e50', life: 1.0, gravity: 0.1, spin: random(-0.2, 0.2), type: 'debris'
+                }));
+                spawnParticles(1, () => new GameParticle(hitX, hitY, 0, 0, { radius: 80, color: '#ffa502', endColor: '#ffffff', life: 1.0, type: 'shockwave' }));
+            } else {
+                spawnParticles(6, () => new GameParticle(hitX, hitY, wallDirX * random(1, 4) + random(-1.5, 1.5), wallDirY * random(1, 4) + random(-1.5, 1.5), {
+                    radius: random(1.5, 4), color: '#ffffff', endColor: '#1e272e', life: 0.8, gravity: 0.15, spin: random(-0.2, 0.2), type: 'debris'
+                }));
+            }
+        }
+
+        if (!(this.isDummy && debugConfig.dummyFrozen) && Math.random() < 0.04) {
+            let angle = Math.atan2(this.vy, this.vx);
+            angle += random(-0.25, 0.25); 
+            this.vx = Math.cos(angle) * this.baseSpeed;
+            this.vy = Math.sin(angle) * this.baseSpeed;
+        }
+
+        for (let key in this.cooldowns) {
+            if (debugConfig.noCooldown) {
+                this.cooldowns[key] = 0;
+            } else {
+                if (this.cooldowns[key] > 0) this.cooldowns[key]--;
+            }
+        }
+
+        if (this.trailDuration > 0) {
+            if (this.trailDuration % 3 === 0) {
+                entities.push(new Trail(this.x, this.y, this.color, this, 12));
+            }
+            this.trailDuration--;
+        }
+    }
+
+    castRanged(enemy) {
+        if (!debugConfig.noCooldown && this.cooldowns.barrage > 0) return false;
+        const angleToEnemy = Math.atan2(enemy.y - this.y, enemy.x - this.x);
+
+        if (this.currentRangedElement === 'fire') {
+            if (currentSkillTier === 'basic') {
+                let bVx = Math.cos(angleToEnemy) * 8.5;
+                let bVy = Math.sin(angleToEnemy) * 8.5;
+                entities.push(new FireProjectile(this.x, this.y, bVx, bVy, 9, '#ff3838', this, 180));
+            } else if (currentSkillTier === 'advanced') {
+                let bVx = Math.cos(angleToEnemy) * 8.0;
+                let bVy = Math.sin(angleToEnemy) * 8.0;
+                entities.push(new FireNovaBall(this.x, this.y, bVx, bVy, 12, '#ff4757', this, 220));
+            } else if (currentSkillTier === 'ultimate') {
+                for (let i = 0; i < 5; i++) {
+                    setTimeout(() => {
+                        if (isGameOver) return;
+                        entities.push(new Meteor(enemy.x + random(-100, 100), enemy.y + random(-100, 100), this, 450));
+                    }, i * 200);
+                }
+            }
+        } 
+        else if (this.currentRangedElement === 'water') {
+            if (currentSkillTier === 'basic') {
+                let bVx = Math.cos(angleToEnemy) * 9.5;
+                let bVy = Math.sin(angleToEnemy) * 9.5;
+                entities.push(new WaterProjectile(this.x, this.y, bVx, bVy, 7, '#38b6ff', this, 140));
+            } else if (currentSkillTier === 'advanced') {
+                let bVx = Math.cos(angleToEnemy) * 9.0;
+                let bVy = Math.sin(angleToEnemy) * 9.0;
+                entities.push(new WaterVortexCore(this.x, this.y, bVx, bVy, 10, '#10ac84', this, 200));
+            } else if (currentSkillTier === 'ultimate') {
+                entities.push(new TidalWave(this, 800));
+            }
+        } 
+        else if (this.currentRangedElement === 'thunder') {
+            if (currentSkillTier === 'basic') {
+                const spread = 0.18;
+                for (let i = -1; i <= 1; i++) {
+                    let bulletAngle = angleToEnemy + i * spread;
+                    entities.push(new ThunderBall(this.x, this.y, Math.cos(bulletAngle)*9.0, Math.sin(bulletAngle)*9.0, 5, '#a29bfe', this, 90));
+                }
+            } else if (currentSkillTier === 'advanced') {
+                const spread = 0.15;
+                for (let i = -2; i <= 2; i++) {
+                    let bulletAngle = angleToEnemy + i * spread;
+                    entities.push(new AdvancedThunderBall(this.x, this.y, Math.cos(bulletAngle)*8.5, Math.sin(bulletAngle)*8.5, 6, '#00a8ff', this, 105));
+                }
+            } else if (currentSkillTier === 'ultimate') {
+                entities.push(new ThunderStormCloud(enemy.x, enemy.y, this, 350));
+            }
+        } 
+        else if (this.currentRangedElement === 'earth') {
+            if (currentSkillTier === 'basic') {
+                let bVx = Math.cos(angleToEnemy) * 10.5;
+                let bVy = Math.sin(angleToEnemy) * 10.5;
+                entities.push(new EarthProjectile(this.x, this.y, bVx, bVy, 11, '#d1ccc0', this, 220));
+            } else if (currentSkillTier === 'advanced') {
+                let bVx = Math.cos(angleToEnemy) * 10.0;
+                let bVy = Math.sin(angleToEnemy) * 10.0;
+                entities.push(new EarthShatterProjectile(this.x, this.y, bVx, bVy, 13, '#eccc68', this, 250));
+            } else if (currentSkillTier === 'ultimate') {
+                entities.push(new EarthSpikeSpawner(this, enemy, 1000));
+            }
+        }
+
+        this.cooldowns.barrage = this.maxCooldowns.barrage;
+        return true;
+    }
+
+    castMelee(enemy) {
+        if (!debugConfig.noCooldown && this.cooldowns.melee > 0) return false;
+        entities.push(new LightBlade(this, enemy, 650));
+        this.cooldowns.melee = this.maxCooldowns.melee;
+        return true;
+    }
+
+    castWallTrap(enemy) {
+        if (!debugConfig.noCooldown && this.cooldowns.wallTrap > 0) return false;
+        const angleToEnemy = Math.atan2(enemy.y - this.y, enemy.x - this.x);
+        let trapAngle = angleToEnemy + random(-0.4, 0.4); 
+        let tVx = Math.cos(trapAngle) * 6.5;
+        let tVy = Math.sin(trapAngle) * 6.5;
+        entities.push(new WallTrap(this.x, this.y, tVx, tVy, this.color, this, 15)); 
+        this.cooldowns.wallTrap = this.maxCooldowns.wallTrap;
+        return true;
+    }
+
+    castTrail() {
+        if (!debugConfig.noCooldown && this.cooldowns.trail > 0) return false;
+        this.trailDuration = 80; 
+        this.cooldowns.trail = this.maxCooldowns.trail;
+        return true;
+    }
+
+    castSentry() {
+        if (!debugConfig.noCooldown && this.cooldowns.sentry > 0) return false;
+        this.sentryAmmo = 3; 
+        this.cooldowns.sentry = this.maxCooldowns.sentry;
+        return true;
+    }
+
+    draw(ctx) {
+        ctx.save();
+        ctx.shadowBlur = 15; ctx.shadowColor = this.color;
+        
+        if (this.sentryAmmo > 0) {
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2);
+            ctx.strokeStyle = "#ffa502"; ctx.lineWidth = 2; ctx.setLineDash([4, 4]); ctx.stroke();
+        }
+
+        ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+        ctx.closePath();
+        
+        let angle = Math.atan2(this.vy, this.vx);
+        let eyeX = this.x + Math.cos(angle) * (this.radius * 0.6);
+        let eyeY = this.y + Math.sin(angle) * (this.radius * 0.6);
+        ctx.beginPath(); ctx.arc(eyeX, eyeY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = "white"; ctx.fill();
+        ctx.closePath();
+
+        if (this.isDummy) {
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.radius * 0.5, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 2; ctx.stroke();
+            ctx.closePath();
+        }
+        ctx.restore();
+    }
+}
+
+// 游戏全局实例
+let redFighter, blueFighter;
+
+// 触发技能控制
+function playerCastSkill(skillName) {
+    if (isGameOver || !redFighter) return;
+    
+    if (skillName === 'barrage') redFighter.castRanged(blueFighter); 
+    if (skillName === 'melee') redFighter.castMelee(blueFighter);
+    if (skillName === 'wallTrap') redFighter.castWallTrap(blueFighter);
+    if (skillName === 'trail') redFighter.castTrail();
+    if (skillName === 'sentry') redFighter.castSentry();
+    
+    updateUI();
+}
+
+function initGame() {
+    isGameOver = false;
+    document.getElementById('game-over').classList.add('hidden');
+    
+    redFighter = new Fighter("红方", 150, GAME_HEIGHT/2, "#ff3344", true, false);
+    blueFighter = new Fighter("训练木桩", GAME_WIDTH - 150, GAME_HEIGHT/2, "#10ac84", false, true);
+    
+    entities = [];
+    damageTexts = [];
+    particles = [];
+    
+    setRangedElement('fire'); 
+    setSkillTier('basic');
+    updateUI();
+}
+
+function endGame(winnerName) {
+    isGameOver = true;
+    const gameOverScreen = document.getElementById('game-over');
+    const winnerText = document.getElementById('winner-text');
+    gameOverScreen.classList.remove('hidden');
+    
+    if (winnerName === "训练木桩") {
+        winnerText.innerText = `机体损毁！你被木桩撞碎了！`;
+        winnerText.style.color = "#10ac84";
+    } else {
+        winnerText.innerText = `${winnerName} 胜利！`;
+        winnerText.style.color = "#ff3344";
+    }
+}
+
+function resetGame() {
+    initGame();
+}
+
+// ============================================================================
+// 调试控制面板接口
+// ============================================================================
+
+function setRangedElement(element) {
+    currentRangedElement = element;
+    if (redFighter) redFighter.currentRangedElement = element;
+    updateElementUI();
+}
+
+// 切换档位
+function setSkillTier(tier) {
+    currentSkillTier = tier;
+    updateTierUI();
+}
+
+function toggleNoCD(enabled) {
+    debugConfig.noCooldown = enabled;
+}
+
+function toggleDummyFreeze(enabled) {
+    debugConfig.dummyFrozen = enabled;
+}
+
+function adjustSpeed(who, value) {
+    let val = parseFloat(value);
+    if (who === 'red') {
+        debugConfig.redSpeed = val;
+        document.getElementById('val-red-speed').innerText = val.toFixed(1);
+    } else {
+        debugConfig.blueSpeed = val;
+        document.getElementById('val-blue-speed').innerText = val.toFixed(1);
+    }
+}
+
+function adjustRadius(who, value) {
+    let val = parseInt(value);
+    if (who === 'blue') {
+        debugConfig.blueRadius = val;
+        document.getElementById('val-blue-radius').innerText = val + "px";
+    }
+}
+
+function emergencyHeal() {
+    if (redFighter) {
+        redFighter.hp = redFighter.maxHp;
+        updateUI();
+    }
+}
+
+function resetDummyDamage() {
+    if (blueFighter) {
+        blueFighter.totalDamageTaken = 0;
+        updateUI();
+    }
+}
+
+function updateElementUI() {
+    const elements = ['fire', 'water', 'thunder', 'earth'];
+    const elBtnClasses = {
+        fire: 'bg-red-950 text-red-400 border-red-800/50',
+        water: 'bg-blue-950 text-blue-400 border-blue-900/50',
+        thunder: 'bg-purple-950 text-purple-400 border-purple-800/50',
+        earth: 'bg-amber-950 text-amber-500 border-amber-800/50'
+    };
+
+    elements.forEach(el => {
+        const elBtn = document.getElementById(`db-el-${el}`);
+        if (elBtn) {
+            if (el === currentRangedElement) {
+                elBtn.className = `text-xs py-1 rounded font-bold border-2 border-white scale-105 opacity-100 ${elBtnClasses[el].split(' ')[0]} ${elBtnClasses[el].split(' ')[1]}`;
+            } else {
+                elBtn.className = `text-xs py-1 rounded font-bold opacity-50 ${elBtnClasses[el]}`;
+            }
+        }
+    });
+
+    updateDescAndMainButton();
+}
+
+function updateTierUI() {
+    const tiers = ['basic', 'advanced', 'ultimate'];
+    const tierStyles = {
+        basic: { active: 'bg-white text-black border-white', inactive: 'bg-gray-800 text-gray-400 border-gray-700' },
+        advanced: { active: 'bg-amber-500 text-black border-amber-500', inactive: 'bg-gray-800 text-amber-500/70 border-gray-700' },
+        ultimate: { active: 'bg-red-600 text-white border-red-600', inactive: 'bg-gray-800 text-red-500/70 border-gray-700' }
+    };
+
+    tiers.forEach(t => {
+        const tBtn = document.getElementById(`tier-${t}`);
+        if (tBtn) {
+            if (t === currentSkillTier) {
+                tBtn.className = `text-[11px] py-1 rounded font-black border-2 transition-all ${tierStyles[t].active}`;
+            } else {
+                tBtn.className = `text-[11px] py-1 rounded font-bold transition-all ${tierStyles[t].inactive}`;
+            }
+        }
+    });
+
+    updateDescAndMainButton();
+}
+
+function updateDescAndMainButton() {
+    const descText = document.getElementById('skill-desc');
+    if (descText && skillDescriptions[currentRangedElement] && skillDescriptions[currentRangedElement][currentSkillTier]) {
+        descText.innerText = skillDescriptions[currentRangedElement][currentSkillTier];
+    }
+
+    const mainBtnText = document.querySelector('#btn-barrage span');
+    const mainBtn = document.getElementById('btn-barrage');
+    if (mainBtnText && mainBtn) {
+        const elementNames = {
+            fire: { basic: '🔥火羽神爆', advanced: '🔥烈焰新星', ultimate: '🔥末日审判' },
+            water: { basic: '💧水幕狂澜', advanced: '💧涡流漩涡', ultimate: '💧海神怒啸' },
+            thunder: { basic: '⚡迅雷狂飙', advanced: '⚡宙斯惩戒', ultimate: '⚡雷霆炼狱' },
+            earth: { basic: '🪨裂地巨岩', advanced: '🪨陨星裂变', ultimate: '🪨地崩山摧' }
+        };
+        const elementBtnClasses = {
+            fire: 'from-red-600 to-red-800 shadow-red-900/40 border-red-600',
+            water: 'from-blue-500 to-blue-700 shadow-blue-900/40 border-blue-500',
+            thunder: 'from-purple-600 to-purple-800 shadow-purple-900/40 border-purple-600',
+            earth: 'from-amber-700 to-amber-900 shadow-amber-900/40 border-amber-700'
+        };
+
+        mainBtnText.innerText = elementNames[currentRangedElement][currentSkillTier];
+        mainBtn.className = `skill-btn py-2 bg-gradient-to-b ${elementBtnClasses[currentRangedElement]} text-white text-xs font-black rounded border shadow-lg`;
+    }
+}
+
+function updateUI() {
+    const redHpPercent = Math.max(0, (redFighter.hp / redFighter.maxHp) * 100);
+    
+    document.getElementById('red-hp').style.width = redHpPercent + "%";
+    document.getElementById('red-hp-text').innerText = `${Math.floor(Math.max(0, redFighter.hp))} / ${redFighter.maxHp}`;
+    
+    document.getElementById('blue-hp').style.width = "100%";
+    document.getElementById('blue-hp-text').innerText = `已承受伤害: ${Math.floor(blueFighter.totalDamageTaken)}`;
+
+    const badge = document.getElementById('sentry-ammo-badge');
+    if (redFighter.sentryAmmo > 0) {
+        badge.classList.remove('hidden');
+        badge.innerText = `哨兵部署中: ${redFighter.sentryAmmo}`;
+    } else {
+        badge.classList.add('hidden');
+    }
+
+    const skills = ['barrage', 'melee', 'wallTrap', 'trail', 'sentry'];
+    skills.forEach(skill => {
+        const btn = document.getElementById(`btn-${skill}`);
+        const cdBar = document.getElementById(`cd-${skill}`);
+        if (!btn || !cdBar) return;
+
+        const cd = redFighter.cooldowns[skill];
+        const maxCd = redFighter.maxCooldowns[skill];
+        
+        if (cd > 0 && !debugConfig.noCooldown) {
+            btn.disabled = true;
+            cdBar.style.width = `${(cd / maxCd) * 100}%`;
+        } else {
+            btn.disabled = false;
+            cdBar.style.width = '0%';
+        }
+    });
+}
+
+function drawThunderLinks() {
+    if (isGameOver) return;
+    let thunderBalls = entities.filter(e => (e instanceof ThunderBall || e instanceof AdvancedThunderBall) && !e.markForDelete);
+    
+    for (let i = 0; i < thunderBalls.length; i++) {
+        for (let j = i + 1; j < thunderBalls.length; j++) {
+            let tb1 = thunderBalls[i];
+            let tb2 = thunderBalls[j];
+            let d = distance(tb1.x, tb1.y, tb2.x, tb2.y);
+            
+            let limit = (tb1 instanceof AdvancedThunderBall) ? 230 : 180;
+            if (d < limit) { 
+                drawLightningArc(ctx, tb1.x, tb1.y, tb2.x, tb2.y, '#9b5de5');
+
+                let pDummy = { x: blueFighter.x, y: blueFighter.y };
+                let segDist = distToSegment(pDummy, { x: tb1.x, y: tb1.y }, { x: tb2.x, y: tb2.y });
+                
+                if (segDist < blueFighter.radius + 6) {
+                    blueFighter.takeDamage(tb1 instanceof AdvancedThunderBall ? 8 : 5); 
+                    
+                    if (Math.random() < 0.25) {
+                        spawnParticles(2, () => new GameParticle(blueFighter.x + random(-15,15), blueFighter.y + random(-15,15), random(-1,1), random(-1,1), {
+                            radius: 1, color: '#ffffff', endColor: '#9b5de5', life: 0.4, type: 'electric'
+                        }));
+                    }
+                }
+            }
+        }
+    }
+}
+
+function drawLightningArc(ctx, x1, y1, x2, y2, color) {
+    ctx.save();
+    ctx.strokeStyle = color; ctx.shadowBlur = 10; ctx.shadowColor = color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x1, y1);
+
+    let dist = distance(x1, y1, x2, y2);
+    let steps = Math.floor(dist / 14);
+    let angle = Math.atan2(y2 - y1, x2 - x1);
+
+    for (let i = 1; i < steps; i++) {
+        let t = i / steps;
+        let targetX = x1 + (x2 - x1) * t;
+        let targetY = y1 + (y2 - y1) * t;
+        let offset = random(-8, 8);
+        let perpAngle = angle + Math.PI / 2;
+        let nextX = targetX + Math.cos(perpAngle) * offset;
+        let nextY = targetY + Math.sin(perpAngle) * offset;
+        ctx.lineTo(nextX, nextY);
+    }
+    ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.8; ctx.stroke();
+    ctx.restore();
+}
+
+function checkCollisions() {
+    const fighters = [redFighter, blueFighter];
+
+    entities.forEach(entity => {
+        fighters.forEach(fighter => {
+            if (entity.owner === fighter) return; 
+
+            const dist = distance(entity.x, entity.y, fighter.x, fighter.y);
+            
+            if (entity instanceof Projectile || 
+                entity instanceof FireProjectile || 
+                entity instanceof FireNovaBall ||
+                entity instanceof MiniFireball ||
+                entity instanceof Meteor ||
+                entity instanceof WaterProjectile ||
+                entity instanceof WaterVortexCore ||
+                entity instanceof WaterDroplet || 
+                entity instanceof EarthProjectile || 
+                entity instanceof EarthShatterProjectile ||
+                entity instanceof EarthSpikeShard ||
+                entity instanceof ThunderBall ||
+                entity instanceof AdvancedThunderBall) {
+                
+                if (dist < entity.radius + fighter.radius) {
+                    fighter.takeDamage(entity.damage);
+                    entity.markForDelete = true;
+
+                    let sparkColor = entity.color;
+                    if (entity instanceof FireProjectile || entity instanceof Meteor) sparkColor = '#ff3344';
+                    if (entity instanceof ThunderBall || entity instanceof AdvancedThunderBall) sparkColor = '#ffffff';
+
+                    spawnParticles(8, () => new GameParticle(entity.x, entity.y, random(-4, 4), random(-4, 4), {
+                        radius: random(1, 2.5), color: sparkColor, endColor: '#ffffff', life: 0.7, type: 'spark'
+                    }));
+
+                    if (entity instanceof FireProjectile) {
+                        entity.explode();
+                    } else if (entity instanceof FireNovaBall) {
+                        entity.novaBurst();
+                    } else if (entity instanceof WaterProjectile) {
+                        entity.splatter();
+                    } else if (entity instanceof WaterVortexCore) {
+                        entities.push(new WaterVortexField(entity.x, entity.y, entity.owner, entity.damage));
+                    } else if (entity instanceof EarthShatterProjectile) {
+                        entity.shatterSpike();
+                    }
+                }
+            } 
+            else if (entity instanceof WallTrap) {
+                if (entity.isAttached && dist < entity.radius + fighter.radius) {
+                    fighter.takeDamage(entity.damage);
+                    if (Math.random() < 0.15) {
+                        spawnParticles(1, () => new GameParticle(fighter.x, fighter.y, 0, 0, { radius: 1, color: '#a29bfe', endColor: '#ffffff', life: 0.3, type: 'electric' }));
+                    }
+                }
+            }
+            else if (entity instanceof Trail) {
+                if (dist < entity.radius + fighter.radius) {
+                    fighter.takeDamage(entity.damage); 
+                }
+            }
+        });
+    });
+
+    const distFighters = distance(redFighter.x, redFighter.y, blueFighter.x, blueFighter.y);
+    if (distFighters < redFighter.radius + blueFighter.radius) {
+        const dx = blueFighter.x - redFighter.x;
+        const dy = blueFighter.y - redFighter.y;
+        const nx = dx / distFighters;
+        const ny = dy / distFighters;
+        
+        let tx = redFighter.vx;
+        let ty = redFighter.vy;
+        redFighter.vx = blueFighter.vx * 1.25;
+        redFighter.vy = blueFighter.vy * 1.25;
+        blueFighter.vx = tx * 1.25;
+        blueFighter.vy = ty * 1.25;
+
+        const overlap = (redFighter.radius + blueFighter.radius) - distFighters;
+        redFighter.x -= nx * (overlap / 2);
+        redFighter.y -= ny * (overlap / 2);
+        blueFighter.x += nx * (overlap / 2);
+        blueFighter.y += ny * (overlap / 2);
+        
+        redFighter.takeDamage(120); 
+        blueFighter.takeDamage(120); 
+
+        spawnParticles(16, () => new GameParticle((redFighter.x + blueFighter.x)/2, (redFighter.y + blueFighter.y)/2, random(-6, 6), random(-6, 6), {
+            radius: random(2, 4), color: '#ffffff', endColor: '#ffeaa7', life: 1.0, type: 'spark'
+        }));
+        spawnParticles(1, () => new GameParticle((redFighter.x + blueFighter.x)/2, (redFighter.y + blueFighter.y)/2, 0, 0, { radius: 100, color: '#ffffff', endColor: '#ff7675', life: 1.0, type: 'shockwave' }));
+    }
+}
+
+// 主渲染逻辑
+function gameLoop() {
+    let now = performance.now();
+    fps = Math.round(1000 / (now - lastTime));
+    lastTime = now;
+    document.getElementById('fps-counter').innerText = fps;
+
+    if (!isGameOver) {
+        ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+        // 绘制赛博太空背景网格
+        ctx.strokeStyle = "rgba(255,255,255,0.015)";
+        ctx.lineWidth = 1;
+        for (let i = 40; i < GAME_WIDTH; i += 40) {
+            ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, GAME_HEIGHT); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(GAME_WIDTH, i); ctx.stroke();
+        }
+
+        // 绘制高亮红色战斗边缘能量线
+        ctx.save();
+        ctx.strokeStyle = "#ff3344";
+        ctx.lineWidth = 4;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#ff3344";
+        ctx.strokeRect(2, 2, GAME_WIDTH - 4, GAME_HEIGHT - 4); 
+        ctx.restore();
+
+        // 状态更新
+        redFighter.update(blueFighter);
+        blueFighter.update(redFighter);
+
+        particles.forEach(p => p.update());
+        entities.forEach(e => e.update());
+        damageTexts.forEach(t => t.update());
+
+        // 清理死亡单位
+        entities = entities.filter(e => !e.markForDelete);
+        damageTexts = damageTexts.filter(t => t.life > 0);
+        particles = particles.filter(p => p.life > 0);
+
+        checkCollisions();
+
+        // --- 渲染流水线 ---
+        
+        // 1. 底层：残影、粒子、雷霆闪电链、磁爆地雷
+        drawThunderLinks(); 
+        entities.forEach(e => { if (e instanceof Trail || e instanceof WallTrap || e instanceof WaterVortexField) e.draw(ctx); });
+        particles.forEach(p => p.draw(ctx));
+
+        // 2. 中层：近战、哨兵、红蓝身体、地面突刺
+        entities.forEach(e => { if (e instanceof LightBlade || e instanceof Sentry || e instanceof SingleSpikeEruption) e.draw(ctx); });
+        redFighter.draw(ctx);
+        blueFighter.draw(ctx);
+        
+        // 3. 高层：飞行的普通/特殊弹幕、各类元素子弹实体
+        entities.forEach(e => { 
+            if (e instanceof Projectile || 
+                e instanceof FireProjectile || 
+                e instanceof FireNovaBall ||
+                e instanceof MiniFireball ||
+                e instanceof Meteor ||
+                e instanceof WaterProjectile ||
+                e instanceof WaterVortexCore ||
+                e instanceof WaterDroplet || 
+                e instanceof TidalWave ||
+                e instanceof EarthProjectile || 
+                e instanceof EarthShatterProjectile ||
+                e instanceof EarthSpikeShard ||
+                e instanceof ThunderBall ||
+                e instanceof AdvancedThunderBall) {
+                e.draw(ctx); 
+            }
+        });
+
+        // 4. 顶层：暴击数字
+        damageTexts.forEach(t => t.draw(ctx));
+
+        updateUI();
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+// 启动
+initGame();
+gameLoop();
+
+</script>
+</body>
+</html>
